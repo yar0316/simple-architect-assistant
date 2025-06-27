@@ -22,16 +22,19 @@ uv venv
 仮想環境を有効化します。
 
 **Windows (コマンドプロンプト) の場合:**
+
 ```cmd
 .venv\Scripts\activate
 ```
 
 **Windows (PowerShell) の場合:**
+
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
 **macOS/Linux の場合:**
+
 ```bash
 source .venv/bin/activate
 ```
@@ -48,10 +51,10 @@ uv pip install -r requirements.txt
 
 このアプリケーションは、設定にStreamlitのSecrets管理機能を利用します。
 
-1.  **設定ファイルの確認:**
+1. **設定ファイルの確認:**
     設定ファイルは `.streamlit/secrets.toml` にあります。
 
-2.  **設定ファイルの編集:**
+2. **設定ファイルの編集:**
     AWSプロファイルとリージョン情報をファイルに記述してください。`default` 以外のプロファイルを使用する場合は、適宜修正してください。
 
     ```toml
