@@ -15,11 +15,19 @@ import os
 # パスを追加
 sys.path.append(os.path.dirname(__file__))
 
+# ページ設定
+st.set_page_config(
+    page_title="AWS構成提案 - Simple Architect Assistant",
+    page_icon="💬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # モジュールをインポート
 
 # --- Streamlit UI ---
 
-st.title("💬 Simple Architect Assistant")
+st.title("💬 AWS構成提案チャット")
 
 # セッション状態を初期化
 initialize_session_state()
@@ -30,11 +38,29 @@ if "bedrock_service" not in st.session_state:
 
 bedrock_service = st.session_state.bedrock_service
 
+# サイドバーにページ情報と設定を表示
+with st.sidebar:
+    st.header("📄 ページ情報")
+    st.markdown("**現在のページ:** AWS構成提案")
+    st.markdown("---")
+    
+    st.header("⚙️ 設定")
+    display_settings_tab(bedrock_service)
+    
+    st.markdown("---")
+    
+    st.header("📊 統計")
+    # パフォーマンス統計表示
+    display_performance_stats()
+    
+    # LangChain統計表示
+    if bedrock_service.is_langchain_available():
+        display_langchain_stats()
+
 # タブの定義
-tab_chat, tab_stats, tab_settings = st.tabs([
+tab_chat, tab_stats = st.tabs([
     "💬 チャット",
-    "📊 統計",
-    "⚙️ 設定"
+    "📊 詳細統計"
 ])
 
 with tab_chat:
@@ -84,7 +110,3 @@ with tab_stats:
         # メモリ統計表示
         if bedrock_service.memory_manager and bedrock_service.memory_manager.is_available():
             display_memory_stats(bedrock_service.memory_manager)
-
-with tab_settings:
-    # 設定タブ表示
-    display_settings_tab(bedrock_service.is_langchain_available())
