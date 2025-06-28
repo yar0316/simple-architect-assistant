@@ -23,9 +23,11 @@ def initialize_session_state():
             "successful_requests": 0
         }
 
-def display_chat_history():
+def display_chat_history(messages=None):
     """チャット履歴を表示"""
-    for msg in st.session_state.messages:
+    if messages is None:
+        messages = st.session_state.messages
+    for msg in messages:
         st.chat_message(msg["role"]).write(msg["content"])
 
 def add_message_to_history(role: str, content: str):
