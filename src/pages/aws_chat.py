@@ -69,6 +69,33 @@ with tab_chat:
     # チャット履歴の表示
     display_chat_history()
 
+    # Terraform生成への連携ボタン（チャット履歴がある場合のみ表示）
+    if st.session_state.messages and len(st.session_state.messages) > 0:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🔧 この構成でTerraformコード生成", use_container_width=True, type="primary"):
+                # 最新のAI応答を共有データとして保存
+                latest_assistant_message = None
+                for message in reversed(st.session_state.messages):
+                    if message["role"] == "assistant":
+                        latest_assistant_message = message["content"]
+                        break
+                
+                if latest_assistant_message:
+                    # 共有セッション状態に保存
+                    st.session_state.shared_aws_config = {
+                        "content": latest_assistant_message,
+                        "timestamp": st.session_state.get("timestamp", "不明"),
+                        "source": "AWS構成検討チャット"
+                    }
+                    st.success("AWS構成をTerraform生成に引き継ぎました！")
+                    st.balloons()
+                    # ページ遷移のためのナビゲーション情報を設定
+                    st.session_state.navigate_to_terraform = True
+                    st.info("👆 左側のナビゲーションから「Terraform コード生成」を選択してください")
+                else:
+                    st.error("引き継ぎ可能なAWS構成が見つかりませんでした")
+
     # ユーザーからの入力
     if prompt := st.chat_input():
         # ユーザーのメッセージを履歴に追加して表示

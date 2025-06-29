@@ -27,6 +27,10 @@ st.set_page_config(
 st.title("🔧 Terraform コード生成")
 st.markdown("AWS Terraformコードの自動生成を支援するチャットです。")
 
+# AWS構成検討からの引き継ぎ状態を表示
+if "shared_aws_config" in st.session_state:
+    st.success("✅ AWS構成検討チャットから構成情報が引き継がれました。チャット履歴を確認してください。")
+
 # Terraformシステムプロンプトのパス
 TERRAFORM_PROMPT_FILE = os.path.join(
     parent_dir,
@@ -53,6 +57,35 @@ if "terraform_messages" not in st.session_state:
         }
     ]
 
+# AWS構成検討チャットからの引き継ぎデータを処理
+if "shared_aws_config" in st.session_state and st.session_state.get("navigate_to_terraform", False):
+    # 引き継ぎメッセージを追加（初回のみ）
+    if not any(msg.get("from_aws_chat", False) for msg in st.session_state.terraform_messages):
+        shared_config = st.session_state.shared_aws_config
+        
+        # AWS構成検討の結果をTerraform生成チャットに引き継ぎ
+        handover_message = f"""
+AWS構成検討チャットから以下の構成が引き継がれました：
+
+---
+**引き継がれた構成:**
+{shared_config['content']}
+---
+
+この構成をもとにTerraformコードを生成いたします。
+設定を確認して、必要に応じて追加の要件をお聞かせください。
+        """
+        
+        st.session_state.terraform_messages.append({
+            "role": "assistant",
+            "content": handover_message,
+            "from_aws_chat": True,
+            "shared_config": shared_config
+        })
+    
+    # ナビゲーションフラグをリセット
+    st.session_state.navigate_to_terraform = False
+
 if "terraform_cache_stats" not in st.session_state:
     st.session_state.terraform_cache_stats = {
         "total_requests": 0,
@@ -63,6 +96,17 @@ if "terraform_cache_stats" not in st.session_state:
 # サイドバーに設定
 with st.sidebar:
     st.header("🔧 Terraform設定")
+    
+    # AWS構成検討からの引き継ぎ情報を表示
+    if "shared_aws_config" in st.session_state:
+        with st.expander("📋 引き継がれた構成", expanded=True):
+            shared_config = st.session_state.shared_aws_config
+            st.write(f"**取得元:** {shared_config['source']}")
+            st.write(f"**取得時刻:** {shared_config['timestamp']}")
+            if st.button("引き継ぎデータをクリア", key="clear_shared"):
+                del st.session_state.shared_aws_config
+                st.rerun()
+        st.markdown("---")
 
     # 環境選択
     environment = st.selectbox(
@@ -138,6 +182,22 @@ with col1:
         対象環境: {environment}
         AWSリージョン: {aws_region}
         出力形式: {output_format}
+        """
+        
+        # AWS構成検討からの引き継ぎデータがある場合は追加
+        if "shared_aws_config" in st.session_state:
+            shared_config = st.session_state.shared_aws_config
+            context_info += f"""
+        
+        【引き継がれたAWS構成】:
+        {shared_config['content']}
+        
+        【現在のリクエスト】: {user_input}
+        
+        上記の引き継がれたAWS構成を基にTerraformコードを生成してください。
+        """
+        else:
+            context_info += f"""
         
         ユーザーリクエスト: {user_input}
         """
