@@ -234,7 +234,11 @@ with tab_chat:
                 use_langchain = st.session_state.get("use_langchain", True)
 
                 # BedrockServiceを使用してストリーミング応答を取得
-                for chunk in bedrock_service.invoke_streaming(enhanced_prompt, enable_cache, use_langchain):
+                for chunk in bedrock_service.invoke_streaming(
+                    prompt=enhanced_prompt,
+                    enable_cache=enable_cache,
+                    use_langchain=use_langchain
+                ):
                     full_response += chunk
                     message_placeholder.write(full_response + "▌")  # カーソル表示
 

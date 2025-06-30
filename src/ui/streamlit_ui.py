@@ -176,7 +176,11 @@ def handle_chat_input(bedrock_service, memory_manager=None):
                 use_langchain = st.session_state.get("use_langchain", True)
                 
                 # ストリーミング応答を処理
-                for chunk in bedrock_service.invoke_streaming(prompt, enable_cache, use_langchain):
+                for chunk in bedrock_service.invoke_streaming(
+                    prompt=prompt,
+                    enable_cache=enable_cache,
+                    use_langchain=use_langchain
+                ):
                     full_response += chunk
                     message_placeholder.write(full_response + "▌")
                 
@@ -370,7 +374,7 @@ def perform_cost_analysis(selected_services, usage_params, architecture_context,
             
             # ストリーミングレスポンスでコスト分析結果を取得
             for chunk in bedrock_service.invoke_streaming(
-                full_prompt,
+                prompt=full_prompt,
                 enable_cache=st.session_state.get("enable_cache", True),
                 use_langchain=st.session_state.get("use_langchain", True)
             ):
