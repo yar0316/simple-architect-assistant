@@ -279,18 +279,25 @@ MCPサーバーが提供した情報を基に、さらに詳細で実用的な�
                     full_response = ""
                     message_placeholder = st.empty()
 
-                    # BedrockServiceを使用してストリーミング応答を取得
-                    for chunk in bedrock_service.invoke_streaming(
-                        prompt=enhanced_context,
-                        system_prompt=terraform_system_prompt,
-                        enable_cache=enable_cache,
-                        use_langchain=use_langchain
-                    ):
-                        full_response += chunk
-                        message_placeholder.write(full_response + "▌")
+                    # BedrockServiceのシステムプロンプトを一時的に上書き
+                    original_system_prompt = bedrock_service.system_prompt
+                    bedrock_service.system_prompt = terraform_system_prompt
 
-                    # 最終応答を表示
-                    message_placeholder.write(full_response)
+                    try:
+                        # BedrockServiceを使用してストリーミング応答を取得
+                        for chunk in bedrock_service.invoke_streaming(
+                            enhanced_context,
+                            enable_cache,
+                            use_langchain
+                        ):
+                            full_response += chunk
+                            message_placeholder.write(full_response + "▌")
+
+                        # 最終応答を表示
+                        message_placeholder.write(full_response)
+                    finally:
+                        # システムプロンプトを元に戻す
+                        bedrock_service.system_prompt = original_system_prompt
 
                     # AIメッセージを履歴に追加
                     st.session_state.terraform_messages.append({
