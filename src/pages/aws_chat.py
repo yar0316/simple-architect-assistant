@@ -16,20 +16,17 @@ try:
         display_langchain_stats,
         display_memory_stats,
         display_settings_tab,
-        add_message_to_history
+        add_message_to_history,
+        display_cost_analysis_button,
+        display_cost_analysis_ui
     )
     from services.bedrock_service import BedrockService
+    from services.mcp_client import get_mcp_client
 except ImportError as e:
     st.error(f"モジュールのインポートに失敗しました: {e}")
     st.stop()
 
-# ページ設定
-st.set_page_config(
-    page_title="AWS構成提案 - Simple Architect Assistant",
-    page_icon="💬",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ページ設定はメインのapp.pyで設定済み
 
 st.title("💬 AWS構成提案チャット")
 
@@ -42,6 +39,9 @@ if "bedrock_service" not in st.session_state:
 
 bedrock_service = st.session_state.bedrock_service
 
+# MCPクライアントを初期化
+mcp_client = get_mcp_client()
+
 # サイドバーにページ情報と設定を表示
 with st.sidebar:
     st.header("📄 ページ情報")
@@ -50,6 +50,70 @@ with st.sidebar:
 
     display_settings_tab(bedrock_service)
 
+    st.markdown("---")
+    
+    # MCP統合設定
+    st.header("🔧 MCP統合設定")
+    
+    # MCP統合の有効/無効
+    enable_mcp = st.toggle(
+        "MCP統合を有効化",
+        value=st.session_state.get("enable_mcp", True),
+        help="AWS MCP サーバーとの統合を有効化します。より詳細なAWS情報とガイダンスを提供します。"
+    )
+    st.session_state.enable_mcp = enable_mcp
+    
+    if enable_mcp:
+        # 利用可能なMCPツールを表示
+        available_tools = mcp_client.get_available_tools()
+        if available_tools:
+            st.success(f"✅ {len(available_tools)} 個のMCPサーバーが利用可能")
+            with st.expander("利用可能なMCPサーバー"):
+                for tool in available_tools:
+                    st.write(f"• {tool}")
+        else:
+            # MCPライブラリの利用可能性をチェック
+            try:
+                from langchain_mcp_adapters.client import MultiServerMCPClient
+                mcp_available = True
+            except ImportError:
+                mcp_available = False
+            
+            debug_info = f"MCP_AVAILABLE: {mcp_available}"
+            if not mcp_available:
+                debug_info += " (langchain-mcp-adaptersが見つかりません)"
+            
+            # MCPクライアントの詳細情報を追加
+            debug_info += f"\nMCPクライアント状態: {type(mcp_client).__name__}"
+            debug_info += f"\nMCP設定ファイル存在: {os.path.exists(mcp_client.config_path) if hasattr(mcp_client, 'config_path') else 'N/A'}"
+            
+            # 設定ファイルパスの詳細確認
+            if hasattr(mcp_client, 'config_path'):
+                debug_info += f"\nMCP設定ファイルパス: {mcp_client.config_path}"
+            else:
+                # 期待されるパスを計算
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                parent_dir = os.path.dirname(current_dir)
+                project_root = os.path.dirname(parent_dir)
+                expected_config_path = os.path.join(project_root, "config", "mcp_config.json")
+                debug_info += f"\nMCP期待される設定ファイルパス: {expected_config_path}"
+                debug_info += f"\nMCP期待される設定ファイル存在: {os.path.exists(expected_config_path)}"
+            
+            # uvxの存在確認
+            import subprocess
+            import os
+            try:
+                uvx_result = subprocess.run(['uvx', '--version'], capture_output=True, text=True, timeout=5)
+                debug_info += f"\nuvx利用可能: {uvx_result.returncode == 0}"
+            except:
+                debug_info += f"\nuvx利用可能: False"
+            
+            # MCPクライアント初期化エラー情報
+            if hasattr(st.session_state, 'mcp_client_error'):
+                debug_info += f"\nMCPクライアント初期化エラー: {st.session_state.mcp_client_error}"
+            
+            st.warning(f"⚠️ MCPサーバーが初期化されていません\n\nデバッグ情報: {debug_info}")
+    
     st.markdown("---")
 
     # パフォーマンス統計表示
@@ -69,8 +133,15 @@ with tab_chat:
     # チャット履歴の表示
     display_chat_history()
 
-    # Terraform生成への連携ボタン（チャット履歴がある場合のみ表示）
+    # アクションボタン（チャット履歴がある場合のみ表示）
     if st.session_state.messages and len(st.session_state.messages) > 0:
+        # コスト分析ボタン
+        display_cost_analysis_button()
+        
+        # コスト分析UI表示
+        display_cost_analysis_ui(mcp_client)
+        
+        # Terraform生成への連携ボタン
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if st.button("🔧 この構成でTerraformコード生成", use_container_width=True, type="primary"):
@@ -106,6 +177,55 @@ with tab_chat:
         with st.chat_message("assistant"):
             with st.spinner("AIが応答を生成中です..."):
                 full_response = ""
+                enhanced_prompt = prompt
+                
+                # MCP統合が有効な場合、追加情報を取得
+                if st.session_state.get("enable_mcp", True):
+                    with st.spinner("MCPサーバーから追加情報を取得中..."):
+                        try:
+                            # Core MCPからプロンプトの理解とガイダンスを取得
+                            core_guidance = mcp_client.get_core_mcp_guidance(prompt)
+                            
+                            # AWS Documentation から関連情報を取得
+                            # キーワード抽出（簡易版）
+                            aws_keywords = []
+                            aws_services = ["EC2", "S3", "RDS", "Lambda", "CloudFront", "VPC", "IAM", 
+                                          "CloudWatch", "ELB", "Auto Scaling", "DynamoDB", "SNS", "SQS"]
+                            for service in aws_services:
+                                if service.lower() in prompt.lower():
+                                    aws_keywords.append(service)
+                            
+                            aws_docs = None
+                            if aws_keywords:
+                                search_query = " ".join(aws_keywords[:3])  # 最初の3つのキーワードを使用
+                                aws_docs = mcp_client.get_aws_documentation(search_query)
+                            
+                            # プロンプトを拡張
+                            if core_guidance or aws_docs:
+                                enhanced_prompt = f"""ユーザーの質問: {prompt}
+
+【MCP統合情報】"""
+                                
+                                if core_guidance:
+                                    enhanced_prompt += f"""
+
+■ Core MCPガイダンス:
+{core_guidance}"""
+                                
+                                if aws_docs:
+                                    enhanced_prompt += f"""
+
+■ AWS公式ドキュメント情報:
+{str(aws_docs)[:500]}..."""  # 長すぎる場合は切り捨て
+                                
+                                enhanced_prompt += f"""
+
+上記のMCP情報を参考に、ユーザーの質問に対して最適なAWS構成を提案してください。"""
+                        
+                        except Exception as e:
+                            st.warning(f"MCP情報の取得中にエラーが発生しました: {str(e)}")
+                            # エラーが発生してもオリジナルのプロンプトで続行
+                
                 # プレースホルダーを作成し、逐次更新する
                 message_placeholder = st.empty()
 
@@ -114,7 +234,7 @@ with tab_chat:
                 use_langchain = st.session_state.get("use_langchain", True)
 
                 # BedrockServiceを使用してストリーミング応答を取得
-                for chunk in bedrock_service.invoke_streaming(prompt, enable_cache, use_langchain):
+                for chunk in bedrock_service.invoke_streaming(enhanced_prompt, enable_cache, use_langchain):
                     full_response += chunk
                     message_placeholder.write(full_response + "▌")  # カーソル表示
 

@@ -10,18 +10,13 @@ if parent_dir not in sys.path:
 
 try:
     from services.bedrock_service import BedrockService
+    from services.mcp_client import get_mcp_client
     from ui.streamlit_ui import display_chat_history
 except ImportError as e:
     st.error(f"モジュールのインポートに失敗しました: {e}")
     st.stop()
 
-# ページ設定
-st.set_page_config(
-    page_title="Terraform コード生成 - Simple Architect Assistant",
-    page_icon="🔧",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ページ設定はメインのapp.pyで設定済み
 
 # ページタイトル
 st.title("🔧 Terraform コード生成")
@@ -47,6 +42,9 @@ def init_bedrock_service():
 
 
 bedrock_service = init_bedrock_service()
+
+# MCPクライアントを初期化
+mcp_client = get_mcp_client()
 
 # セッション状態の初期化
 if "terraform_messages" not in st.session_state:
@@ -128,6 +126,27 @@ with st.sidebar:
         ["モジュール化構造", "単一ファイル", "ディレクトリ構造のみ"],
         index=0
     )
+
+    st.markdown("---")
+
+    # MCP統合設定
+    st.header("🔧 MCP統合設定")
+    
+    # MCP統合の有効/無効
+    enable_mcp = st.toggle(
+        "MCP統合を有効化",
+        value=st.session_state.get("enable_terraform_mcp", True),
+        help="Terraform MCP サーバーとの統合を有効化します。より高品質なTerraformコードが生成されます。"
+    )
+    st.session_state.enable_terraform_mcp = enable_mcp
+    
+    if enable_mcp:
+        # 利用可能なMCPツールを表示
+        available_tools = mcp_client.get_available_tools()
+        if "awslabs.terraform-mcp-server" in available_tools:
+            st.success("✅ Terraform MCPサーバーが利用可能")
+        else:
+            st.warning("⚠️ Terraform MCPサーバーが初期化されていません")
 
     st.markdown("---")
 
@@ -216,12 +235,53 @@ with col1:
                     except FileNotFoundError:
                         terraform_system_prompt = "あなたはTerraformエキスパートです。AWSのTerraformコードを生成してください。"
 
+                    enhanced_context = context_info
+                    
+                    # MCP統合が有効な場合、Terraform MCPサーバーからコード生成
+                    if st.session_state.get("enable_terraform_mcp", True):
+                        with st.spinner("Terraform MCPサーバーから高品質コードを生成中..."):
+                            try:
+                                # Core MCPからガイダンスを取得
+                                core_guidance = mcp_client.get_core_mcp_guidance(context_info)
+                                
+                                # Terraform MCPサーバーからコード生成
+                                terraform_code = mcp_client.generate_terraform_code(context_info)
+                                
+                                # プロンプトを拡張
+                                if core_guidance or terraform_code:
+                                    enhanced_context = f"""ユーザーリクエスト: {context_info}
+
+【MCP統合情報】"""
+                                    
+                                    if core_guidance:
+                                        enhanced_context += f"""
+
+■ Core MCPガイダンス:
+{core_guidance}"""
+                                    
+                                    if terraform_code:
+                                        enhanced_context += f"""
+
+■ Terraform MCPサーバー生成コード:
+```terraform
+{terraform_code}
+```"""
+                                    
+                                    enhanced_context += f"""
+
+上記のMCP情報を参考に、ユーザーのリクエストに対して最適化されたTerraformコードを生成してください。
+MCPサーバーが提供した情報を基に、さらに詳細で実用的なコードを提供してください。"""
+                            
+                            except Exception as e:
+                                st.warning(f"MCP情報の取得中にエラーが発生しました: {str(e)}")
+                                # エラーが発生してもオリジナルのコンテキストで続行
+
                     full_response = ""
                     message_placeholder = st.empty()
 
                     # BedrockServiceを使用してストリーミング応答を取得
                     for chunk in bedrock_service.invoke_streaming(
-                        prompt=context_info,
+                        prompt=enhanced_context,
                         system_prompt=terraform_system_prompt,
                         enable_cache=enable_cache,
                         use_langchain=use_langchain
