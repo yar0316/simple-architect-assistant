@@ -4,6 +4,7 @@ import boto3
 import json
 import os
 from typing import Iterator, Optional
+from contextlib import contextmanager
 
 # LangChain統合のインポート
 try:
@@ -170,3 +171,28 @@ class BedrockService:
     def is_langchain_available(self) -> bool:
         """LangChain統合が利用可能かチェック"""
         return LANGCHAIN_INTEGRATION_AVAILABLE and self.langchain_llm is not None
+    
+    @contextmanager
+    def override_system_prompt(self, new_prompt: str):
+        """
+        システムプロンプトを一時的に上書きするコンテキストマネージャー
+        
+        Args:
+            new_prompt: 一時的に使用するシステムプロンプト
+            
+        Usage:
+            with bedrock_service.override_system_prompt("新しいプロンプト"):
+                # この範囲内でsystem_promptが上書きされる
+                response = bedrock_service.invoke_streaming(
+                    prompt=prompt,
+                    enable_cache=enable_cache,
+                    use_langchain=use_langchain
+                )
+            # withブロックを抜けると自動的に元のプロンプトに戻る
+        """
+        original_prompt = self.system_prompt
+        try:
+            self.system_prompt = new_prompt
+            yield
+        finally:
+            self.system_prompt = original_prompt
