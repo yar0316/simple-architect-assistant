@@ -1,0 +1,158 @@
+name: バグレポート / Bug Report
+description: アプリケーションの不具合を報告する
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## バグレポートテンプレート
+        アプリケーションで発生した不具合の報告にご利用ください。
+
+  - type: textarea
+    id: bug-summary
+    attributes:
+      label: バグの概要
+      description: 発生している問題について簡潔に説明してください
+      placeholder: 例）Terraformコード生成時にエラーが発生してコードが表示されない
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 重要度
+      description: このバグの重要度を選択してください
+      options:
+        - 低 (Minor) - 軽微な問題
+        - 中 (Major) - 機能に影響があるが回避可能
+        - 高 (Critical) - 主要機能が使用不可
+        - 緊急 (Blocker) - アプリケーション全体が使用不可
+      default: 1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-page
+    attributes:
+      label: 影響を受けるページ
+      description: 問題が発生するページを選択してください
+      options:
+        - AWS構成提案チャット
+        - Terraformコード生成
+        - アプリケーション全体
+        - 設定・初期化
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: 現在の動作
+      description: 実際に何が起こっているか詳しく説明してください
+      placeholder: |
+        例）
+        - チャットでTerraformコード生成を依頼
+        - 処理中のメッセージが表示される
+        - しばらく待つとエラーメッセージが表示される
+        - コードが一切生成されない
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: 期待する動作
+      description: 本来どのような動作をするべきか説明してください
+      placeholder: |
+        例）
+        - チャットでTerraformコード生成を依頼
+        - 処理中のメッセージが表示される
+        - Terraformコードが正常に生成・表示される
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: 再現手順
+      description: 問題を再現するための詳細な手順を記載してください
+      placeholder: |
+        1. アプリケーションを起動する
+        2. 「Terraformコード生成」ページに移動する
+        3. 「EC2インスタンスを作成したい」と入力する
+        4. 送信ボタンをクリックする
+        5. エラーが発生する
+    validations:
+      required: true
+
+  - type: textarea
+    id: error-messages
+    attributes:
+      label: エラーメッセージ
+      description: 表示されるエラーメッセージがある場合は、完全な内容を貼り付けてください
+      placeholder: |
+        例）
+        ```
+        StreamlitAPIException: An error occurred while calling the Bedrock API: 
+        AccessDeniedException: User is not authorized to perform: bedrock:InvokeModel
+        ```
+      render: text
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境情報
+      description: 問題が発生している環境について教えてください
+      placeholder: |
+        - OS: Windows 11 / macOS 13.0 / Ubuntu 22.04
+        - Python バージョン: 3.11.5
+        - ブラウザ: Chrome 120.0 / Firefox 121.0 / Safari 17.0
+        - AWS CLI バージョン: 2.15.0
+        - AWS プロファイル: default
+        - AWS リージョン: us-east-1
+      value: |
+        - OS: 
+        - Python バージョン: 
+        - ブラウザ: 
+        - AWS CLI バージョン: 
+        - AWS プロファイル: 
+        - AWS リージョン: 
+    validations:
+      required: true
+
+  - type: textarea
+    id: aws-config
+    attributes:
+      label: AWS設定情報
+      description: AWS関連の設定について教えてください（機密情報は含めないでください）
+      placeholder: |
+        - Bedrockサービスへのアクセス権限: あり/なし/不明
+        - Claude 3.7 Sonnetモデルへのアクセス: あり/なし/不明
+        - .streamlit/secrets.toml の設定: 正常/設定なし/不明
+        - AWS認証情報: 設定済み/未設定/不明
+
+  - type: textarea
+    id: console-logs
+    attributes:
+      label: コンソールログ
+      description: ブラウザの開発者ツールのコンソールにエラーが表示されている場合は貼り付けてください
+      placeholder: |
+        ブラウザで F12 を押して開発者ツールを開き、Console タブのエラーメッセージをコピーしてください
+      render: text
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 回避策
+      description: 問題を回避する方法を見つけた場合は記載してください
+      placeholder: 例）ページを再読み込みすると一時的に解決する
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 追加情報
+      description: その他、問題の解決に役立つ情報があれば記載してください（スクリーンショット、設定ファイルの内容など）

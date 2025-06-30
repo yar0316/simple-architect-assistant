@@ -1,0 +1,174 @@
+name: インフラ・DevOps / Infrastructure
+description: インフラストラクチャやDevOps関連の改善を提案する
+title: "[INFRA] "
+labels: ["infrastructure", "devops"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## インフラ・DevOpsテンプレート
+        デプロイメント、CI/CD、セキュリティ、運用関連の改善提案にご利用ください。
+
+  - type: textarea
+    id: infra-summary
+    attributes:
+      label: 改善内容の概要
+      description: インフラやDevOpsに関する改善内容を簡潔に説明してください
+      placeholder: 例）Docker化してデプロイメントを自動化したい
+    validations:
+      required: true
+
+  - type: dropdown
+    id: infra-category
+    attributes:
+      label: カテゴリ
+      description: この改善提案のカテゴリを選択してください
+      options:
+        - コンテナ化 (Docker/Podman)
+        - CI/CD パイプライン
+        - クラウドデプロイメント
+        - セキュリティ強化
+        - 監視・ログ
+        - バックアップ・復旧
+        - パフォーマンス最適化
+        - 開発環境整備
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-state
+    attributes:
+      label: 現在の状況
+      description: 現在のインフラ・運用体制について説明してください
+      placeholder: |
+        例）
+        - 現在はローカル環境での開発・テストのみ
+        - デプロイメントは手動で行っている
+        - セキュリティチェックが自動化されていない
+        - 本番環境での運用実績がない
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: 提案する解決策
+      description: どのような改善を行うか具体的に説明してください
+      placeholder: |
+        例）
+        - Dockerfileを作成してアプリケーションをコンテナ化
+        - GitHub Actionsを使用してCI/CDパイプラインを構築
+        - AWS ECS/Fargateでのデプロイメント環境を整備
+        - セキュリティスキャンの自動化
+        - ログ監視とアラート機能の実装
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target-platform
+    attributes:
+      label: 対象プラットフォーム
+      description: 主に対象とするプラットフォームを選択してください
+      options:
+        - AWS
+        - Google Cloud Platform
+        - Microsoft Azure
+        - オンプレミス
+        - マルチクラウド
+        - 開発環境のみ
+        - プラットフォーム非依存
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical-requirements
+    attributes:
+      label: 技術要件
+      description: 実装に必要な技術要件や制約があれば記載してください
+      placeholder: |
+        例）
+        - Docker 20.10以上
+        - AWS CLIの設定済み環境
+        - GitHub Secretsでの認証情報管理
+        - Python 3.9以上の対応
+        - Streamlitアプリケーションの特性考慮
+
+  - type: textarea
+    id: security-considerations
+    attributes:
+      label: セキュリティ考慮事項
+      description: セキュリティに関する考慮事項があれば記載してください
+      placeholder: |
+        例）
+        - AWS認証情報の安全な管理
+        - コンテナイメージの脆弱性スキャン
+        - HTTPS通信の強制
+        - ファイアウォール設定
+        - ログの適切な管理
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 優先度
+      description: この改善の重要度を選択してください
+      options:
+        - 低 (Nice to have)
+        - 中 (Should have)  
+        - 高 (Must have)
+        - 緊急 (Critical)
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation-plan
+    attributes:
+      label: 実装計画
+      description: 段階的な実装計画があれば記載してください
+      placeholder: |
+        フェーズ1: 
+        - [ ] Dockerfileの作成とローカル動作確認
+        - [ ] 基本的なCI設定
+        
+        フェーズ2:
+        - [ ] クラウド環境の構築
+        - [ ] 自動デプロイメントの実装
+        
+        フェーズ3:
+        - [ ] 監視・ログ機能の追加
+        - [ ] セキュリティ強化
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: 成功基準
+      description: この改善が完了したと判断できる基準を記載してください
+      placeholder: |
+        例）
+        - [ ] コンテナ化されたアプリケーションが正常に動作する
+        - [ ] Git pushでCI/CDが自動実行される
+        - [ ] 本番環境への自動デプロイが可能
+        - [ ] セキュリティスキャンが自動実行される
+        - [ ] 監視・アラート機能が動作する
+
+  - type: textarea
+    id: risks-concerns
+    attributes:
+      label: リスク・懸念事項
+      description: 実装において想定されるリスクや懸念事項があれば記載してください
+      placeholder: |
+        例）
+        - AWS料金の増加
+        - 既存機能への影響
+        - 学習コストの高さ
+        - 運用保守の複雑化
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 追加情報
+      description: その他、実装に役立つ情報があれば記載してください（参考URL、類似事例など）

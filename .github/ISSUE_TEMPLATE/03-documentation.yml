@@ -1,0 +1,137 @@
+name: ドキュメント改善 / Documentation
+description: ドキュメントの追加・修正・改善を提案する
+title: "[DOCS] "
+labels: ["documentation"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ドキュメント改善テンプレート
+        ドキュメントの追加、修正、改善提案にご利用ください。
+
+  - type: textarea
+    id: doc-summary
+    attributes:
+      label: ドキュメント改善の概要
+      description: どのようなドキュメントの改善が必要か簡潔に説明してください
+      placeholder: 例）AWS設定手順が不明確で初期セットアップに時間がかかる
+    validations:
+      required: true
+
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: ドキュメントの種類
+      description: 改善したいドキュメントの種類を選択してください
+      options:
+        - README.md
+        - セットアップ・インストール手順
+        - 使用方法・操作ガイド
+        - API・技術仕様
+        - トラブルシューティング
+        - 設定・構成説明
+        - 開発者向けドキュメント
+        - その他
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target-audience
+    attributes:
+      label: 対象読者
+      description: このドキュメントの主な対象読者を選択してください
+      options:
+        - 初回利用者
+        - 一般ユーザー
+        - 開発者・コントリビューター
+        - システム管理者
+        - 全般
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-issue
+    attributes:
+      label: 現在の問題
+      description: 現在のドキュメントで分かりにくい点や不足している点を具体的に説明してください
+      placeholder: |
+        例）
+        - AWS設定でどのIAMポリシーが必要かが明記されていない
+        - Bedrockの利用可能リージョンについて記載がない
+        - エラー発生時の対処法が不明
+        - スクリーンショットがなく手順が分かりにくい
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-improvement
+    attributes:
+      label: 改善提案
+      description: どのような改善を行うべきか具体的に提案してください
+      placeholder: |
+        例）
+        - 必要なIAMポリシーのJSON例を追加
+        - Bedrockサポートリージョン一覧表を追加
+        - よくあるエラーとその解決方法を整理
+        - セットアップ手順のスクリーンショットを追加
+        - 設定ファイルのサンプルを充実
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected-files
+    attributes:
+      label: 関連ファイル
+      description: 修正・追加が必要なファイルがあれば記載してください
+      placeholder: |
+        例）
+        - README.md
+        - CLAUDE.md
+        - docs/setup-guide.md
+        - .streamlit/secrets.toml.example
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: 緊急度
+      description: このドキュメント改善の緊急度を選択してください
+      options:
+        - 低 - 時間があるときに対応
+        - 中 - 近いうちに対応したい
+        - 高 - 早急に対応が必要
+        - 緊急 - 即座の対応が必要
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: 成功基準
+      description: このドキュメント改善が完了したと判断できる基準を記載してください
+      placeholder: |
+        例）
+        - [ ] 初回利用者がAWS設定を30分以内に完了できる
+        - [ ] エラー発生時の対処法が明確に記載されている
+        - [ ] 設定例が実際の環境で動作することを確認済み
+        - [ ] レビューを経て文章が分かりやすく修正されている
+
+  - type: textarea
+    id: reference-resources
+    attributes:
+      label: 参考資料
+      description: 改善に役立つ参考資料やリンクがあれば記載してください
+      placeholder: |
+        例）
+        - AWS Bedrock公式ドキュメント
+        - Streamlit公式ガイド
+        - 他の類似プロジェクトの例
+        - ユーザーからのフィードバック
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 追加情報
+      description: その他、ドキュメント改善に役立つ情報があれば記載してください

@@ -1,0 +1,148 @@
+name: 質問・議論 / Question & Discussion
+description: 技術的な質問や議論の提起
+title: "[QUESTION] "
+labels: ["question"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 質問・議論テンプレート
+        技術的な質問、実装方針の相談、アーキテクチャ検討などにご利用ください。
+
+  - type: textarea
+    id: question-summary
+    attributes:
+      label: 質問・議論の概要
+      description: 質問や議論したい内容を簡潔に説明してください
+      placeholder: 例）AWS Bedrockの代わりにAzure OpenAI Serviceを使用することは可能か？
+    validations:
+      required: true
+
+  - type: dropdown
+    id: question-type
+    attributes:
+      label: 質問の種類
+      description: 質問の種類を選択してください
+      options:
+        - 技術的な質問
+        - 実装方針の相談
+        - アーキテクチャ検討
+        - ベストプラクティス
+        - 設計・仕様の議論
+        - 将来計画の検討
+        - その他の議論
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景・コンテキスト
+      description: 質問や議論の背景を詳しく説明してください
+      placeholder: |
+        例）
+        - 現在のプロジェクトでAWS Bedrockを使用している
+        - 組織のポリシーでAzureを使用する必要が出てきた
+        - 既存の機能を維持しながら移行を検討したい
+        - コストや機能面での比較を行いたい
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-approach
+    attributes:
+      label: 現在のアプローチ・理解
+      description: 現在の実装や理解について説明してください
+      placeholder: |
+        例）
+        - AWS Bedrock Claude 3.7 Sonnetを使用
+        - boto3でのAPI呼び出し
+        - ストリーミングレスポンスの実装
+        - システムプロンプトの管理方法
+
+  - type: textarea
+    id: specific-questions
+    attributes:
+      label: 具体的な質問・論点
+      description: 具体的に知りたいことや議論したい論点を箇条書きで記載してください
+      placeholder: |
+        例）
+        - Azure OpenAI ServiceのAPIはBedrock APIと互換性があるか？
+        - 移行時に必要な作業量はどの程度か？
+        - ストリーミング機能はサポートされているか？
+        - コスト面でのメリット・デメリットは？
+        - 認証方式の違いは？
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 優先度
+      description: この質問・議論の緊急度を選択してください
+      options:
+        - 低 - 時間があるときで良い
+        - 中 - 近いうちに検討したい
+        - 高 - 早急に決定が必要
+        - 緊急 - 即座に検討が必要
+      default: 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 制約・条件
+      description: 技術的制約や要件、制限事項があれば記載してください
+      placeholder: |
+        例）
+        - 組織のクラウドポリシー
+        - 予算制限
+        - セキュリティ要件
+        - 既存システムとの連携
+        - 開発スケジュール
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 検討している選択肢
+      description: 現在検討している選択肢があれば記載してください
+      placeholder: |
+        例）
+        1. Azure OpenAI Serviceへの移行
+        2. AWS Bedrockとの併用
+        3. オンプレミスLLMの検討
+        4. 複数クラウドでのマルチベンダー構成
+
+  - type: textarea
+    id: expected-outcome
+    attributes:
+      label: 期待する結果
+      description: この質問・議論を通じて得たい結果を説明してください
+      placeholder: |
+        例）
+        - 移行の可否と難易度の把握
+        - 実装方針の決定
+        - 技術的な課題の洗い出し
+        - コストベネフィット分析
+        - 今後の開発計画の策定
+
+  - type: textarea
+    id: research-done
+    attributes:
+      label: 既に調べた内容
+      description: 既に調査や検討を行った内容があれば記載してください
+      placeholder: |
+        例）
+        - Azure OpenAI Service公式ドキュメントの確認
+        - 類似プロジェクトの調査
+        - コスト試算の実施
+        - 社内でのヒアリング
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: 追加情報
+      description: その他、議論に役立つ情報があれば記載してください（参考資料、関連リンクなど）
