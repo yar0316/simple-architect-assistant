@@ -1,0 +1,89 @@
+{
+  "mcpServers": {
+    "awslabs.core-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "awslabs-core-mcp-server",
+        "awslabs.core-mcp-server.exe"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "autoApprove": [],
+      "disabled": false
+    },
+    "awslabs.aws-documentation-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "awslabs-aws-documentation-mcp-server",
+        "awslabs.aws-documentation-mcp-server.exe"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "autoApprove": [],
+      "disabled": false
+    },
+    "awslabs.terraform-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "awslabs-terraform-mcp-server",
+        "awslabs.terraform-mcp-server.exe"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "autoApprove": [],
+      "disabled": false
+    }
+  },
+  "platform_overrides": {
+    "darwin": {
+      "mcpServers": {
+        "awslabs.core-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.core-mcp-server@latest"
+          ]
+        },
+        "awslabs.aws-documentation-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.aws-documentation-mcp-server@latest"
+          ]
+        },
+        "awslabs.terraform-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.terraform-mcp-server@latest"
+          ]
+        }
+      }
+    },
+    "linux": {
+      "mcpServers": {
+        "awslabs.core-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.core-mcp-server@latest"
+          ]
+        },
+        "awslabs.aws-documentation-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.aws-documentation-mcp-server@latest"
+          ]
+        },
+        "awslabs.terraform-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.terraform-mcp-server@latest"
+          ]
+        }
+      }
+    }
+  }
+}

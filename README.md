@@ -75,6 +75,28 @@ streamlit run src/app.py
 
 ブラウザで `http://localhost:8501` にアクセスすると、アプリケーションが表示されます。
 
+## MCP (Model Context Protocol) 統合
+
+このアプリケーションは AWS の公式 MCP サーバーと統合して、より高度なAWS構成支援を提供します。
+
+### MCP統合の前提条件
+
+1. **uvx のインストール**
+   ```bash
+   pip install uvx
+   ```
+
+2. **AWS認証情報の設定**
+   ```bash
+   aws configure
+   ```
+
+### MCP設定のカスタマイズ
+
+MCP サーバーの設定は `config/mcp_config.json` で管理されています。詳細な設定方法については [MCP セットアップガイド](docs/mcp_setup.md) を参照してください。
+
+**重要**: MCP統合が利用できない場合でも、アプリケーションはフォールバックモードで動作し、基本的な機能は継続して利用できます。
+
 ## 機能
 
 このアプリケーションは複数のページで構成されています：
@@ -84,6 +106,7 @@ streamlit run src/app.py
 - AWS Well-Architected Frameworkに基づいた構成提案
 - チャット形式での要件ヒアリング
 - コスト効率とセキュリティを考慮した推奨構成
+- **MCP統合**: Core MCP サーバーからのガイダンスとAWS公式ドキュメント情報
 
 ### Terraformコード生成ページ
 
@@ -91,5 +114,14 @@ streamlit run src/app.py
 - モジュール化されたベストプラクティス準拠のコード
 - 複数環境対応（dev/prod/staging）
 - セキュリティとコスト最適化を考慮した設定
+- **MCP統合**: Terraform MCP サーバーからの高品質コード生成
 
 Streamlitの左サイドバーからページを切り替えることができます。
+
+## トラブルシューティング
+
+### MCP関連のエラー
+
+- **404 Not Found エラー**: [MCP セットアップガイド](docs/mcp_setup.md) の「トラブルシューティング」セクションを参照
+- **フォールバックモード**: MCP統合が利用できない場合でも基本機能は動作します
+- **設定の調整**: `config/mcp_config.json` で各プラットフォームに応じた設定を調整可能
