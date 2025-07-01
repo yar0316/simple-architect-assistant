@@ -3,8 +3,16 @@ import streamlit as st
 import boto3
 import json
 import os
+import warnings
 from typing import Iterator, Optional
 from contextlib import contextmanager
+
+# urllib3警告を抑制（HTTPResponse close時のI/Oエラー警告）
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", message="I/O operation on closed file")
+    warnings.filterwarnings("ignore", category=ResourceWarning)
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # LangChain統合のインポート
 try:
@@ -43,8 +51,26 @@ class BedrockService:
     
     def _initialize_bedrock_client(self):
         """Bedrockクライアントを初期化"""
+        from botocore.config import Config
+        
+        # HTTP接続設定を最適化
+        config = Config(
+            region_name=self.aws_region,
+            retries={
+                'max_attempts': 3,
+                'mode': 'adaptive'
+            },
+            max_pool_connections=10,  # 接続プール数を制限
+            read_timeout=60,          # 読み取りタイムアウト
+            connect_timeout=10        # 接続タイムアウト
+        )
+        
         session = boto3.Session(profile_name=self.aws_profile)
-        self.bedrock_client = session.client("bedrock-runtime", region_name=self.aws_region)
+        self.bedrock_client = session.client(
+            "bedrock-runtime", 
+            region_name=self.aws_region,
+            config=config
+        )
     
     def _load_system_prompt(self):
         """システムプロンプトを読み込み"""
@@ -106,6 +132,7 @@ class BedrockService:
     
     def _invoke_with_converse_api(self, prompt: str, enable_cache: bool = True) -> Iterator[str]:
         """Converse APIを使用した呼び出し"""
+        response = None
         try:
             # 統計更新
             if "cache_stats" in st.session_state:
@@ -152,17 +179,35 @@ class BedrockService:
                     }
                 )
             
-            # ストリーミングレスポンスの処理
-            if response and "stream" in response:
-                for event in response["stream"]:
-                    if "contentBlockDelta" in event:
-                        delta = event["contentBlockDelta"]["delta"]
-                        if "text" in delta:
-                            yield delta["text"]
-                    elif "messageStop" in event:
-                        break
-            else:
-                yield "申し訳ありませんが、応答を取得できませんでした。"
+            # ストリーミングレスポンスの処理（try-finallyで安全性確保）
+            stream_started = False
+            try:
+                if response and "stream" in response:
+                    for event in response["stream"]:
+                        stream_started = True
+                        if "contentBlockDelta" in event:
+                            delta = event["contentBlockDelta"]["delta"]
+                            if "text" in delta:
+                                yield delta["text"]
+                        elif "messageStop" in event:
+                            break
+                else:
+                    yield "申し訳ありませんが、応答を取得できませんでした。"
+            finally:
+                # ストリーミング完了後のクリーンアップ
+                if stream_started and response:
+                    try:
+                        # ストリームが完全に消費されていない場合のクリーンアップ
+                        if "stream" in response:
+                            # 残りのイベントを消費して接続をクリーンに閉じる
+                            for _ in response["stream"]:
+                                pass
+                    except (StopIteration, GeneratorExit):
+                        # 正常終了
+                        pass
+                    except Exception:
+                        # クリーンアップ時のエラーは無視
+                        pass
                 
         except Exception as e:
             st.error(f"Converse APIストリーミング呼び出し中にエラーが発生しました: {e}")

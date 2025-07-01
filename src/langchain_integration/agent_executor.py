@@ -139,7 +139,7 @@ class AWSAgentExecutor:
             
             # Claude 4 Sonnet用のLLM設定
             llm = ChatBedrock(
-                model_id="claude-sonnet-4-20250514-v1:0",
+                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
                 model_kwargs={
                     "max_tokens": 4096,
                     "temperature": 0.1,
@@ -276,8 +276,14 @@ Thought: {agent_scratchpad}"""
         
         return tools
     
-    def invoke_streaming(self, user_input: str, callback_container) -> Iterator[str]:
-        """エージェントをストリーミング実行"""
+    def invoke_streaming(self, user_input: str, callback_container, streaming_delay: float = 0.001):
+        """エージェントをストリーミング実行
+        
+        Args:
+            user_input: ユーザーからの入力
+            callback_container: Streamlitコンテナ（進行状況表示用）
+            streaming_delay: 文字ごとの遅延時間（秒）。0で遅延なし、デフォルト0.001秒
+        """
         if not self.is_initialized:
             yield "エラー: エージェントが初期化されていません"
             return
@@ -286,9 +292,7 @@ Thought: {agent_scratchpad}"""
             # コールバックハンドラー作成
             callback_handler = StreamlitAgentCallbackHandler(callback_container)
             
-            # エージェント実行
-            # 注意: AgentExecutorはストリーミングに直接対応していないため、
-            # 将来的にはカスタム実装が必要
+            # エージェント実行（同期）
             result = self.agent_executor.invoke(
                 {"input": user_input},
                 config={"callbacks": [callback_handler]}
@@ -297,9 +301,12 @@ Thought: {agent_scratchpad}"""
             # 結果を段階的に返す（疑似ストリーミング）
             final_answer = result.get("output", "回答を生成できませんでした")
             
-            # 文字単位で少しずつ返す
+            # 文字単位で少しずつ返す（遅延設定可能）
+            import time
             for char in final_answer:
                 yield char
+                if streaming_delay > 0:  # 遅延が0以上の場合のみ適用
+                    time.sleep(streaming_delay)
                 
         except Exception as e:
             self.logger.error(f"エージェント実行エラー: {e}")

@@ -145,7 +145,7 @@ with st.sidebar:
                     
                     try:
                         # 既存のMCPClientServiceを取得
-                        existing_mcp_client = mcp_client
+                        existing_mcp_client = get_mcp_client()
                         
                         # 既存MCPクライアントとの統合を試行
                         mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client)
@@ -275,10 +275,10 @@ with tab_chat:
                 # エージェント思考プロセス可視化用コンテナ
                 agent_process_container = st.container()
                 
-                with st.spinner("エージェントが思考中です..."):
-                    # エージェントでストリーミング実行
-                    for chunk in st.session_state.aws_agent_executor.invoke_streaming(prompt, agent_process_container):
-                        full_response += chunk
+                # エージェントでストリーミング実行
+                full_response = st.write_stream(
+                    st.session_state.aws_agent_executor.invoke_streaming(prompt, agent_process_container)
+                )
                         
             else:
                 # 手動モード（従来の処理）
