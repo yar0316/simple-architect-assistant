@@ -158,7 +158,7 @@ with st.sidebar:
     # エージェントモードの有効/無効
     enable_agent_mode = st.toggle(
         "エージェントモードを有効化 (Beta)",
-        value=st.session_state.get("enable_terraform_agent_mode", False),
+        value=st.session_state.get("enable_terraform_agent_mode", True),
         help="LangChainエージェントが自律的にツールを選択・実行してTerraformコード生成を支援します。複雑な構成の場合に適していますが、応答時間が長くなる場合があります。"
     )
     st.session_state.enable_terraform_agent_mode = enable_agent_mode
@@ -181,8 +181,8 @@ with st.sidebar:
                         # 既存のMCPClientServiceを取得
                         existing_mcp_client = get_mcp_client()
                         
-                        # 既存MCPクライアントとの統合を試行
-                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client)
+                        # 既存MCPクライアントとの統合を試行（terraform_generatorページ特化）
+                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client, "terraform_generator")
                         
                         if mcp_init_success:
                             tools_count = len(mcp_manager.get_all_tools())
