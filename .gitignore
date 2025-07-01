@@ -138,3 +138,6 @@ dmypy.json
 
 # Issue drafts for GitHub (local only)
 docs/issues/
+
+# Pull request documentation (local only)
+docs/pull_requests/
