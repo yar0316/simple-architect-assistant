@@ -124,6 +124,21 @@ class LangChainBedrockLLM:
             ("human", "{user_input}")
         ])
     
+    def _cleanup_stream_iterator(self, stream_iterator):
+        """ストリームイテレータの適切なクリーンアップを実行"""
+        if stream_iterator:
+            try:
+                # ストリームの残りを消費して接続をクリーンに閉じる
+                for _ in stream_iterator:
+                    pass
+            except (StopIteration, GeneratorExit):
+                pass
+            except Exception:
+                # クリーンアップ時のエラーは抑制
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    pass
+    
     def invoke_streaming(self, prompt: str, system_prompt: str) -> Iterator[str]:
         """ストリーミングでLLMを呼び出し"""
         if self._is_closed:
@@ -153,18 +168,7 @@ class LangChainBedrockLLM:
             yield "申し訳ありませんが、応答を生成できませんでした。"
         finally:
             # ストリームの適切なクリーンアップ
-            if stream_iterator:
-                try:
-                    # ストリームの残りを消費して接続をクリーンに閉じる
-                    for _ in stream_iterator:
-                        pass
-                except (StopIteration, GeneratorExit):
-                    pass
-                except Exception:
-                    # クリーンアップ時のエラーは抑制
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        pass
+            self._cleanup_stream_iterator(stream_iterator)
     
     def invoke_with_memory(self, prompt: str, system_prompt: str, chat_history: list) -> Iterator[str]:
         """メモリ付きでLLMを呼び出し"""
@@ -198,18 +202,7 @@ class LangChainBedrockLLM:
             yield "申し訳ありませんが、応答を生成できませんでした。"
         finally:
             # ストリームの適切なクリーンアップ
-            if stream_iterator:
-                try:
-                    # ストリームの残りを消費して接続をクリーンに閉じる
-                    for _ in stream_iterator:
-                        pass
-                except (StopIteration, GeneratorExit):
-                    pass
-                except Exception:
-                    # クリーンアップ時のエラーは抑制
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        pass
+            self._cleanup_stream_iterator(stream_iterator)
     
     def get_usage_stats(self) -> Dict[str, Any]:
         """使用統計を取得（プレースホルダー）"""
