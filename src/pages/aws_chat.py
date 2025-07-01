@@ -275,7 +275,7 @@ with tab_chat:
                 # エージェント思考プロセス可視化用コンテナ
                 agent_process_container = st.container()
                 
-                # エージェントでストリーミング実行（非同期対応）
+                # エージェントでストリーミング実行
                 full_response = st.write_stream(
                     st.session_state.aws_agent_executor.invoke_streaming(prompt, agent_process_container)
                 )

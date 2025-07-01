@@ -139,7 +139,7 @@ class AWSAgentExecutor:
             
             # Claude 4 Sonnet用のLLM設定
             llm = ChatBedrock(
-                model_id="claude-sonnet-4-20250514-v1:0",
+                model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
                 model_kwargs={
                     "max_tokens": 4096,
                     "temperature": 0.1,
@@ -276,8 +276,8 @@ Thought: {agent_scratchpad}"""
         
         return tools
     
-    async def invoke_streaming(self, user_input: str, callback_container):
-        """エージェントを非同期ストリーミング実行"""
+    def invoke_streaming(self, user_input: str, callback_container):
+        """エージェントをストリーミング実行"""
         if not self.is_initialized:
             yield "エラー: エージェントが初期化されていません"
             return
@@ -286,33 +286,20 @@ Thought: {agent_scratchpad}"""
             # コールバックハンドラー作成
             callback_handler = StreamlitAgentCallbackHandler(callback_container)
             
-            # エージェントを非同期ストリーミング実行
-            final_answer = ""
-            async for chunk in self.agent_executor.astream_log(
+            # エージェント実行（同期）
+            result = self.agent_executor.invoke(
                 {"input": user_input},
                 config={"callbacks": [callback_handler]}
-            ):
-                # 最終的な出力（Final Answer）を探す
-                if "output" in chunk:
-                    output_data = chunk["output"]
-                    if isinstance(output_data, dict) and "output" in output_data:
-                        final_answer = output_data["output"]
-                        break
-                
-                # ストリーミング中の中間結果があれば処理
-                if "ops" in chunk:
-                    for op in chunk["ops"]:
-                        if op["op"] == "add" and "path" in op and op["path"] == "/streamed_output/-":
-                            if "output" in op["value"]:
-                                final_answer = op["value"]["output"]
-                                break
+            )
             
-            # 最終回答を文字単位で返す
-            if final_answer:
-                for char in final_answer:
-                    yield char
-            else:
-                yield "回答を生成できませんでした"
+            # 結果を段階的に返す（疑似ストリーミング）
+            final_answer = result.get("output", "回答を生成できませんでした")
+            
+            # 文字単位で少しずつ返す
+            import time
+            for char in final_answer:
+                yield char
+                time.sleep(0.001)  # 小さな遅延でストリーミング効果
                 
         except Exception as e:
             self.logger.error(f"エージェント実行エラー: {e}")
