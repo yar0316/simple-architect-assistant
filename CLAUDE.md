@@ -26,6 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **ユーザーの要求を受けたら即座に`gemini -p <質問内容>`で壁打ち**を必ず実施
 - Geminiの意見を鵜呑みにせず、1意見として判断。聞き方を変えて多角的な意見を抽出
+- 基本的にGeminiは検索を絡めて利用すること
 - Claude Code内蔵のWebSearchツールは使用しない
 - Geminiがエラーの場合は、聞き方を工夫してリトライ：
   - ファイル名や実行コマンドを渡す（Geminiがコマンドを実行可能）

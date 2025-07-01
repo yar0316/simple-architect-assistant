@@ -233,8 +233,320 @@ uvx run awslabs.core-mcp-server@latest
 uvx run awslabs.aws-documentation-mcp-server@latest
 ```
 
+## LangChain エージェントでのMCP利用（一般的な方法）
+
+### 概要
+
+**LangChain MCP Adapters** (`langchain-mcp-adapters`) は、Model Context Protocol (MCP) をLangChainエコシステムと統合するための公式ライブラリです。MCPは、AIモデルが外部ツールと対話するための標準化されたプロトコルで、このアダプターを使用することで、MCPサーバーが提供するツールをLangChain Agentで簡単に利用できます。
+
+### MCP統合の基本アーキテクチャ
+
+```
+LangChain Agent
+    ↓
+langchain-mcp-adapters (McpClient)
+    ↓
+MCP Protocol (JSON-RPC)
+    ↓
+MCPサーバー群 (様々な機能提供)
+```
+
+### 基本的な実装方法
+
+#### 1. インストール
+
+```bash
+pip install langchain-mcp-adapters
+```
+
+#### 2. 基本的なコード例
+
+```python
+from langchain_mcp_adapters import McpClient
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+# 1. MCPクライアントの初期化
+# portはMCPサーバーがリッスンしているポート番号
+mcp_client = McpClient(port=8080) 
+
+# 2. MCPサーバーからツールを取得
+# get_tools()はLangChainのToolオブジェクトのリストを返す
+mcp_tools = mcp_client.get_tools()
+
+# 3. LangChain Agentの設定
+llm = ChatOpenAI(model="gpt-4-turbo", temperature=0)
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad"),
+])
+
+agent = create_openai_tools_agent(llm, mcp_tools, prompt)
+
+agent_executor = AgentExecutor(
+    agent=agent, 
+    tools=mcp_tools, 
+    verbose=True
+)
+
+# Agentの実行
+result = agent_executor.invoke({
+    "input": "MCPツールを使って何かをしてください"
+})
+```
+
+#### 3. 複数MCPサーバーとの連携
+
+```python
+from langchain_mcp_adapters import McpClient
+from langchain.tools import tool
+
+# 複数のMCPクライアントを作成
+documentation_client = McpClient(port=8080)  # ドキュメント検索
+database_client = McpClient(port=8081)       # データベース操作
+
+# 各クライアントからツールを取得
+doc_tools = documentation_client.get_tools()
+db_tools = database_client.get_tools()
+
+# ローカルツールも定義可能
+@tool
+def local_calculator(expression: str) -> str:
+    """数式を計算します。"""
+    try:
+        result = eval(expression)  # 注意: 本番では安全な評価を使用
+        return str(result)
+    except:
+        return "計算エラー"
+
+# すべてのツールを結合
+all_tools = doc_tools + db_tools + [local_calculator]
+
+# Agentに統合
+agent = create_openai_tools_agent(llm, all_tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=all_tools)
+```
+
+### 統合パターンとベストプラクティス
+
+#### 1. エラーハンドリング
+
+```python
+def get_mcp_tools_safely(port: int, backup_tools=None):
+    """安全にMCPツールを取得"""
+    try:
+        client = McpClient(port=port)
+        tools = client.get_tools()
+        print(f"MCPサーバー（ポート{port}）から{len(tools)}個のツール取得")
+        return tools
+    except ConnectionError:
+        print(f"MCPサーバー（ポート{port}）に接続できません")
+        return backup_tools or []
+    except Exception as e:
+        print(f"ツール取得エラー: {e}")
+        return backup_tools or []
+
+# 使用例
+mcp_tools = get_mcp_tools_safely(8080, backup_tools=[local_calculator])
+```
+
+#### 2. 動的ツール更新
+
+```python
+class DynamicMCPAgent:
+    def __init__(self, llm, prompt):
+        self.llm = llm
+        self.prompt = prompt
+        self.mcp_clients = {}
+        
+    def add_mcp_server(self, name: str, port: int):
+        """MCPサーバーを動的に追加"""
+        try:
+            self.mcp_clients[name] = McpClient(port=port)
+            print(f"MCPサーバー '{name}' を追加しました")
+        except Exception as e:
+            print(f"サーバー追加エラー: {e}")
+    
+    def get_all_tools(self):
+        """すべてのMCPサーバーからツールを収集"""
+        all_tools = []
+        for name, client in self.mcp_clients.items():
+            try:
+                tools = client.get_tools()
+                all_tools.extend(tools)
+                print(f"'{name}' から {len(tools)} 個のツール取得")
+            except Exception as e:
+                print(f"'{name}' からのツール取得失敗: {e}")
+        return all_tools
+    
+    def create_agent(self):
+        """現在のツールセットでAgentを作成"""
+        tools = self.get_all_tools()
+        agent = create_openai_tools_agent(self.llm, tools, self.prompt)
+        return AgentExecutor(agent=agent, tools=tools, verbose=True)
+
+# 使用例
+dynamic_agent = DynamicMCPAgent(llm, prompt)
+dynamic_agent.add_mcp_server("docs", 8080)
+dynamic_agent.add_mcp_server("database", 8081)
+
+agent_executor = dynamic_agent.create_agent()
+```
+
+#### 3. MCPサーバー設定管理
+
+```python
+import json
+from typing import Dict, List
+
+class MCPServerConfig:
+    def __init__(self, config_file: str):
+        with open(config_file, 'r') as f:
+            self.config = json.load(f)
+    
+    def get_mcp_tools(self) -> List:
+        """設定ファイルからMCPツールを取得"""
+        tools = []
+        
+        for server_name, server_config in self.config.get("mcp_servers", {}).items():
+            if server_config.get("disabled", False):
+                continue
+                
+            try:
+                port = server_config["port"]
+                client = McpClient(port=port)
+                server_tools = client.get_tools()
+                tools.extend(server_tools)
+                print(f"{server_name}: {len(server_tools)}個のツール追加")
+                
+            except Exception as e:
+                print(f"{server_name} 接続エラー: {e}")
+                
+        return tools
+
+# 設定ファイル例 (mcp_config.json)
+"""
+{
+  "mcp_servers": {
+    "documentation": {
+      "port": 8080,
+      "description": "ドキュメント検索サーバー",
+      "disabled": false
+    },
+    "database": {
+      "port": 8081, 
+      "description": "データベース操作サーバー",
+      "disabled": false
+    }
+  }
+}
+"""
+
+# 使用例
+config = MCPServerConfig("mcp_config.json")
+mcp_tools = config.get_mcp_tools()
+```
+
+### セキュリティ考慮事項
+
+#### 1. 信頼できるMCPサーバーのみ使用
+
+```python
+# 許可されたサーバーのホワイトリスト
+ALLOWED_MCP_SERVERS = {
+    "localhost:8080": "internal_docs",
+    "internal-server:8081": "database_tools"
+}
+
+def validate_mcp_server(host: str, port: int) -> bool:
+    """MCPサーバーの妥当性確認"""
+    server_key = f"{host}:{port}"
+    return server_key in ALLOWED_MCP_SERVERS
+```
+
+#### 2. ツール実行権限の制御
+
+```python
+from langchain.tools import BaseTool
+
+class SecureMCPTool(BaseTool):
+    """セキュリティ制御付きMCPツール"""
+    
+    def __init__(self, mcp_tool, allowed_operations=None):
+        self.mcp_tool = mcp_tool
+        self.allowed_operations = allowed_operations or []
+        super().__init__(
+            name=mcp_tool.name,
+            description=mcp_tool.description
+        )
+    
+    def _run(self, *args, **kwargs):
+        # 実行前にセキュリティチェック
+        if not self._is_operation_allowed(kwargs):
+            return "この操作は許可されていません"
+        
+        return self.mcp_tool._run(*args, **kwargs)
+    
+    def _is_operation_allowed(self, kwargs) -> bool:
+        # 実装依存のセキュリティロジック
+        return True
+```
+
+### LangGraphとの統合
+
+```python
+from langgraph.graph import Graph
+from langgraph.prebuilt import ToolNode
+
+# MCPツールを取得
+mcp_tools = get_mcp_tools_safely(8080)
+
+# LangGraphでのワークフロー定義
+def create_mcp_workflow():
+    workflow = Graph()
+    
+    # ツールノードの追加
+    tool_node = ToolNode(mcp_tools)
+    workflow.add_node("tools", tool_node)
+    
+    # エージェントノードの追加
+    workflow.add_node("agent", agent_function)
+    
+    # エッジの定義
+    workflow.add_edge("agent", "tools")
+    workflow.add_edge("tools", "agent")
+    
+    return workflow.compile()
+```
+
+### このプロジェクトでの具体的な実装
+
+Simple Architect Assistant では、上記の一般的なパターンを AWS 特化で実装：
+
+- **既存MCP統合**: `MCPClientService` との連携
+- **フォールバック機能**: MCP利用不可時の代替処理  
+- **AWS特化ツール**: ドキュメント検索、Terraform生成、コスト計算
+
+実装詳細は `src/langchain_integration/mcp_tools.py` を参照。
+
 ## 参考資料
 
+### 基本資料
 - [AWS MCP Servers 公式ドキュメント](https://awslabs.github.io/mcp/)
 - [Model Context Protocol 仕様](https://modelcontextprotocol.io/)
 - [uvx 公式ドキュメント](https://docs.astral.sh/uv/)
+
+### LangChain エージェント関連
+- [langchain-mcp-adapters GitHub](https://github.com/model-context-protocol/langchain-mcp-adapters)
+- [LangChain Agents ドキュメント](https://python.langchain.com/docs/modules/agents/)
+- [LangChain Tools ガイド](https://python.langchain.com/docs/modules/tools/)
+- [awesome-mcp-servers](https://github.com/mcp-protocol/awesome-mcp-servers) - 公開MCPサーバーリスト
+
+### 技術詳細
+- [Model Context Protocol 開発者ガイド](https://mcp.dev/)
+- [asyncio と TaskGroup](https://docs.python.org/3/library/asyncio-task.html#task-groups)
+- [AWS Bedrock + LangChain 統合](https://python.langchain.com/docs/integrations/llms/bedrock/)
