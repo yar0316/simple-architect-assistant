@@ -12,6 +12,8 @@ try:
     from services.bedrock_service import BedrockService
     from services.mcp_client import get_mcp_client
     from ui.streamlit_ui import display_chat_history
+    from langchain_integration.agent_executor import create_aws_agent_executor
+    from langchain_integration.mcp_tools import LangChainMCPManager
 except ImportError as e:
     st.error(f"モジュールのインポートに失敗しました: {e}")
     st.stop()
@@ -149,6 +151,92 @@ with st.sidebar:
             st.warning("⚠️ Terraform MCPサーバーが初期化されていません")
 
     st.markdown("---")
+    
+    # エージェントモード設定
+    st.header("🤖 AI エージェントモード")
+    
+    # エージェントモードの有効/無効
+    enable_agent_mode = st.toggle(
+        "エージェントモードを有効化 (Beta)",
+        value=st.session_state.get("enable_terraform_agent_mode", False),
+        help="LangChainエージェントが自律的にツールを選択・実行してTerraformコード生成を支援します。複雑な構成の場合に適していますが、応答時間が長くなる場合があります。"
+    )
+    st.session_state.enable_terraform_agent_mode = enable_agent_mode
+    
+    if enable_agent_mode:
+        # エージェント初期化
+        if "terraform_agent_executor" not in st.session_state:
+            try:
+                # LangChain MCP Manager初期化
+                if "terraform_langchain_mcp_manager" not in st.session_state:
+                    st.session_state.terraform_langchain_mcp_manager = LangChainMCPManager()
+                
+                mcp_manager = st.session_state.terraform_langchain_mcp_manager
+                
+                # 既存のMCPクライアントを使用して初期化
+                if not mcp_manager.is_available():
+                    st.info("🔄 既存のMCPクライアントと統合中...")
+                    
+                    try:
+                        # 既存のMCPClientServiceを取得
+                        existing_mcp_client = get_mcp_client()
+                        
+                        # 既存MCPクライアントとの統合を試行
+                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client)
+                        
+                        if mcp_init_success:
+                            tools_count = len(mcp_manager.get_all_tools())
+                            st.success(f"✅ 既存MCP統合成功: {tools_count}個のツールが利用可能")
+                        else:
+                            st.warning("⚠️ 既存MCPとの統合に失敗しました。フォールバックモードで動作します。")
+                        
+                    except Exception as mcp_error:
+                        st.warning(f"⚠️ MCP統合エラー: {str(mcp_error)}")
+                        st.info("フォールバック機能で動作します。")
+                
+                # エージェントエグゼキューター作成
+                agent_executor = create_aws_agent_executor(bedrock_service)
+                if agent_executor:
+                    # MCPマネージャーでエージェント初期化を試行
+                    if agent_executor.initialize(mcp_manager):
+                        st.session_state.terraform_agent_executor = agent_executor
+                        st.success("✅ Terraform AIエージェントが初期化されました")
+                        
+                        # エージェント統計表示
+                        stats = agent_executor.get_execution_stats()
+                        with st.expander("エージェント詳細情報"):
+                            st.json(stats)
+                    else:
+                        st.warning("⚠️ エージェント初期化に失敗しました。手動モードで動作します。")
+                        st.session_state.terraform_agent_executor = None
+                else:
+                    st.error("❌ エージェントエグゼキューター作成に失敗しました")
+                    st.session_state.terraform_agent_executor = None
+            except ImportError:
+                st.warning("⚠️ LangChain Agent機能が利用できません。手動モードで動作します。")
+                st.session_state.terraform_agent_executor = None
+            except Exception as e:
+                st.error(f"❌ エージェント初期化エラー: {str(e)}")
+                st.session_state.terraform_agent_executor = None
+        
+        # エージェント状態表示
+        if st.session_state.get("terraform_agent_executor"):
+            agent_stats = st.session_state.terraform_agent_executor.get_execution_stats()
+            if agent_stats.get("status") == "初期化済み":
+                st.info(f"🤖 Terraform エージェント ready | ツール数: {agent_stats.get('available_tools', 0)}")
+            
+            # メモリクリアボタン
+            if st.button("🧹 エージェントメモリをクリア", key="terraform_clear_agent_memory"):
+                st.session_state.terraform_agent_executor.clear_memory()
+                st.success("エージェントメモリをクリアしました")
+                st.rerun()
+    else:
+        # エージェントモード無効時は手動モード
+        if "terraform_agent_executor" in st.session_state:
+            del st.session_state.terraform_agent_executor
+        st.info("📋 手動モード: 事前定義されたMCPツール呼び出しを使用")
+    
+    st.markdown("---")
 
     # キャッシュ設定
     enable_cache = st.checkbox("プロンプトキャッシュを有効にする", value=True)
@@ -221,96 +309,128 @@ with col1:
         ユーザーリクエスト: {user_input}
         """
 
-        # AIレスポンスを生成
+        # エージェントモードと手動モードで処理を分岐
         with st.chat_message("assistant"):
-            with st.spinner("Terraformコードを生成中です..."):
-                try:
-                    # 統計更新
-                    st.session_state.terraform_cache_stats["total_requests"] += 1
-
-                    # Terraformシステムプロンプトを読み込み
+            full_response = ""
+            
+            # エージェントモードが有効で、エージェントが利用可能な場合
+            if (st.session_state.get("enable_terraform_agent_mode", False) and 
+                st.session_state.get("terraform_agent_executor") and 
+                st.session_state.terraform_agent_executor.is_initialized):
+                
+                st.info("🤖 Terraform AIエージェントが自律的に最適なコード生成を行います...")
+                
+                # エージェント思考プロセス可視化用コンテナ
+                agent_process_container = st.container()
+                
+                # エージェント用のコンテキスト作成
+                agent_context = f"""
+                【Terraformコード生成リクエスト】
+                {context_info}
+                
+                対象環境: {environment}
+                AWSリージョン: {aws_region}
+                出力形式: {output_format}
+                
+                ユーザーリクエスト: {user_input}
+                
+                Terraformのベストプラクティスに従い、実用的で保守しやすいコードを生成してください。
+                """
+                
+                # エージェントでストリーミング実行
+                full_response = st.write_stream(
+                    st.session_state.terraform_agent_executor.invoke_streaming(agent_context, agent_process_container)
+                )
+                        
+            else:
+                # 手動モード（従来の処理）
+                if st.session_state.get("enable_terraform_agent_mode", False):
+                    st.warning("⚠️ エージェントが利用できないため、手動モードで処理します")
+                
+                with st.spinner("Terraformコードを生成中です..."):
                     try:
-                        with open(TERRAFORM_PROMPT_FILE, "r", encoding="utf-8") as f:
-                            terraform_system_prompt = f.read()
-                    except FileNotFoundError:
-                        terraform_system_prompt = "あなたはTerraformエキスパートです。AWSのTerraformコードを生成してください。"
+                        # 統計更新
+                        st.session_state.terraform_cache_stats["total_requests"] += 1
 
-                    enhanced_context = context_info
-                    
-                    # MCP統合が有効な場合、Terraform MCPサーバーからコード生成
-                    if st.session_state.get("enable_terraform_mcp", True):
-                        with st.spinner("Terraform MCPサーバーから高品質コードを生成中..."):
-                            try:
-                                # Core MCPからガイダンスを取得
-                                core_guidance = mcp_client.get_core_mcp_guidance(context_info)
-                                
-                                # Terraform MCPサーバーからコード生成
-                                terraform_code = mcp_client.generate_terraform_code(context_info)
-                                
-                                # プロンプトを拡張
-                                if core_guidance or terraform_code:
-                                    enhanced_context = f"""ユーザーリクエスト: {context_info}
+                        # Terraformシステムプロンプトを読み込み
+                        try:
+                            with open(TERRAFORM_PROMPT_FILE, "r", encoding="utf-8") as f:
+                                terraform_system_prompt = f.read()
+                        except FileNotFoundError:
+                            terraform_system_prompt = "あなたはTerraformエキスパートです。AWSのTerraformコードを生成してください。"
+
+                        enhanced_context = context_info
+                        
+                        # MCP統合が有効な場合、Terraform MCPサーバーからコード生成
+                        if st.session_state.get("enable_terraform_mcp", True):
+                            with st.spinner("Terraform MCPサーバーから高品質コードを生成中..."):
+                                try:
+                                    # Core MCPからガイダンスを取得
+                                    core_guidance = mcp_client.get_core_mcp_guidance(context_info)
+                                    
+                                    # Terraform MCPサーバーからコード生成
+                                    terraform_code = mcp_client.generate_terraform_code(context_info)
+                                    
+                                    # プロンプトを拡張
+                                    if core_guidance or terraform_code:
+                                        enhanced_context = f"""ユーザーリクエスト: {context_info}
 
 【MCP統合情報】"""
-                                    
-                                    if core_guidance:
-                                        enhanced_context += f"""
+                                        
+                                        if core_guidance:
+                                            enhanced_context += f"""
 
 ■ Core MCPガイダンス:
 {core_guidance}"""
-                                    
-                                    if terraform_code:
-                                        enhanced_context += f"""
+                                        
+                                        if terraform_code:
+                                            enhanced_context += f"""
 
 ■ Terraform MCPサーバー生成コード:
 ```terraform
 {terraform_code}
 ```"""
-                                    
-                                    enhanced_context += f"""
+                                        
+                                        enhanced_context += f"""
 
 上記のMCP情報を参考に、ユーザーのリクエストに対して最適化されたTerraformコードを生成してください。
 MCPサーバーが提供した情報を基に、さらに詳細で実用的なコードを提供してください。"""
-                            
-                            except Exception as e:
-                                st.warning(f"MCP情報の取得中にエラーが発生しました: {str(e)}")
-                                # エラーが発生してもオリジナルのコンテキストで続行
+                                
+                                except Exception as e:
+                                    st.warning(f"MCP情報の取得中にエラーが発生しました: {str(e)}")
+                                    # エラーが発生してもオリジナルのコンテキストで続行
 
-                    full_response = ""
-                    message_placeholder = st.empty()
+                        message_placeholder = st.empty()
 
-                    # BedrockServiceのシステムプロンプトを一時的に上書き
-                    with bedrock_service.override_system_prompt(terraform_system_prompt):
-                        # BedrockServiceを使用してストリーミング応答を取得
-                        for chunk in bedrock_service.invoke_streaming(
-                            prompt=enhanced_context,
-                            enable_cache=enable_cache,
-                            use_langchain=use_langchain
-                        ):
-                            full_response += chunk
-                            message_placeholder.write(full_response + "▌")
+                        # BedrockServiceのシステムプロンプトを一時的に上書き
+                        with bedrock_service.override_system_prompt(terraform_system_prompt):
+                            # BedrockServiceを使用してストリーミング応答を取得
+                            for chunk in bedrock_service.invoke_streaming(
+                                prompt=enhanced_context,
+                                enable_cache=enable_cache,
+                                use_langchain=use_langchain
+                            ):
+                                full_response += chunk
+                                message_placeholder.write(full_response + "▌")
 
-                        # 最終応答を表示
-                        message_placeholder.write(full_response)
+                            # 最終応答を表示
+                            message_placeholder.write(full_response)
 
-                    # AIメッセージを履歴に追加
-                    st.session_state.terraform_messages.append({
-                        "role": "assistant",
-                        "content": full_response
-                    })
+                        # キャッシュヒット統計（簡易推定）
+                        if enable_cache and st.session_state.terraform_cache_stats["total_requests"] > 1:
+                            st.session_state.terraform_cache_stats["cache_hits"] += 1
+                            # 推定値
+                            st.session_state.terraform_cache_stats["total_tokens_saved"] += 800
 
-                    # キャッシュヒット統計（簡易推定）
-                    if enable_cache and st.session_state.terraform_cache_stats["total_requests"] > 1:
-                        st.session_state.terraform_cache_stats["cache_hits"] += 1
-                        # 推定値
-                        st.session_state.terraform_cache_stats["total_tokens_saved"] += 800
+                    except Exception as e:
+                        st.error(f"エラーが発生しました: {str(e)}")
+                        full_response = f"申し訳ありませんが、エラーが発生しました: {str(e)}"
 
-                except Exception as e:
-                    st.error(f"エラーが発生しました: {str(e)}")
-                    st.session_state.terraform_messages.append({
-                        "role": "assistant",
-                        "content": f"申し訳ありませんが、エラーが発生しました: {str(e)}"
-                    })
+        # AIメッセージを履歴に追加（エージェントモード・手動モード共通）
+        st.session_state.terraform_messages.append({
+            "role": "assistant",
+            "content": full_response
+        })
 
 with col2:
     # 右側のサンプル・ヘルプエリア
