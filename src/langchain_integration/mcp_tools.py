@@ -63,7 +63,7 @@ class LangChainMCPManager:
             logging.error(f"既存MCP統合エラー: {e}")
             return False
     
-    def _create_tools_from_mcp_client(self, mcp_client_service, page_type: str = "general"):
+    def _create_tools_from_mcp_client(self, mcp_client_service, page_type: str = PAGE_TYPE_GENERAL):
         """MCPClientServiceをラップしてLangChainツールを作成
         
         Args:
