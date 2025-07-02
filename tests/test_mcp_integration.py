@@ -13,11 +13,20 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 try:
-    from langchain_integration.mcp_tools import LangChainMCPManager, is_langchain_mcp_available
+    from langchain_integration.mcp_tools import (
+        LangChainMCPManager, 
+        is_langchain_mcp_available,
+        PAGE_TYPE_AWS_CHAT,
+        PAGE_TYPE_TERRAFORM_GENERATOR,
+        PAGE_TYPE_GENERAL
+    )
 except ImportError:
     # langchain-mcp-adaptersが利用できない環境でもテストを実行
     LangChainMCPManager = None
     is_langchain_mcp_available = lambda: False
+    PAGE_TYPE_AWS_CHAT = "aws_chat"
+    PAGE_TYPE_TERRAFORM_GENERATOR = "terraform_generator"
+    PAGE_TYPE_GENERAL = "general"
 
 
 class TestLangChainMCPManager(unittest.TestCase):
@@ -134,6 +143,98 @@ class TestMCPToolIntegration(unittest.TestCase):
         result = aws_docs_search("S3")
         self.assertIn("Amazon S3は", result)
         self.assertIn("検索結果:", result)
+
+
+class TestPageSpecificToolBranching(unittest.TestCase):
+    """ページ固有ツール分岐テスト"""
+
+    def setUp(self):
+        """テストセットアップ"""
+        if LangChainMCPManager is None:
+            self.skipTest("LangChain MCP Adapters が利用できません")
+        
+        self.manager = LangChainMCPManager()
+        
+        # モックMCPクライアントサービス作成
+        self.mock_mcp_service = Mock()
+        self.mock_mcp_service.get_available_tools.return_value = ["aws_docs", "terraform"]
+        self.mock_mcp_service.get_aws_documentation.return_value = {
+            "description": "テスト結果",
+            "source": "mock"
+        }
+        self.mock_mcp_service.get_core_mcp_guidance.return_value = "テストガイダンス"
+        self.mock_mcp_service.generate_terraform_code.return_value = "# テストコード"
+
+    def test_aws_chat_page_specific_tools(self):
+        """AWS Chatページ固有ツールのテスト"""
+        # AWS Chatページタイプで初期化
+        result = self.manager.initialize_with_existing_mcp(
+            self.mock_mcp_service, 
+            PAGE_TYPE_AWS_CHAT
+        )
+        
+        if result:
+            tool_names = [tool.name for tool in self.manager.tools]
+            
+            # AWS Chatページには aws_cost_analysis ツールが含まれるべき
+            self.assertIn("aws_cost_analysis", tool_names)
+            
+            # AWS Chatページには terraform_code_generator は含まれないべき
+            self.assertNotIn("terraform_code_generator", tool_names)
+
+    def test_terraform_generator_page_specific_tools(self):
+        """Terraform Generatorページ固有ツールのテスト"""
+        # Terraform Generatorページタイプで初期化
+        result = self.manager.initialize_with_existing_mcp(
+            self.mock_mcp_service, 
+            PAGE_TYPE_TERRAFORM_GENERATOR
+        )
+        
+        if result:
+            tool_names = [tool.name for tool in self.manager.tools]
+            
+            # Terraform Generatorページには terraform_code_generator ツールが含まれるべき
+            self.assertIn("terraform_code_generator", tool_names)
+            
+            # Terraform Generatorページには aws_cost_analysis は含まれないべき
+            self.assertNotIn("aws_cost_analysis", tool_names)
+
+    def test_general_page_all_tools(self):
+        """汎用ページ全ツールのテスト"""
+        # 汎用ページタイプで初期化
+        result = self.manager.initialize_with_existing_mcp(
+            self.mock_mcp_service, 
+            PAGE_TYPE_GENERAL
+        )
+        
+        if result:
+            tool_names = [tool.name for tool in self.manager.tools]
+            
+            # 汎用ページには両方のツールが含まれるべき
+            self.assertIn("aws_cost_analysis", tool_names)
+            self.assertIn("terraform_code_generator", tool_names)
+
+    def test_page_type_constants_consistency(self):
+        """ページタイプ定数の一貫性テスト"""
+        # 定数が正しく定義されていることを確認
+        self.assertEqual(PAGE_TYPE_AWS_CHAT, "aws_chat")
+        self.assertEqual(PAGE_TYPE_TERRAFORM_GENERATOR, "terraform_generator")
+        self.assertEqual(PAGE_TYPE_GENERAL, "general")
+
+    def test_invalid_page_type_fallback(self):
+        """無効なページタイプの場合のフォールバックテスト"""
+        # 無効なページタイプで初期化
+        result = self.manager.initialize_with_existing_mcp(
+            self.mock_mcp_service, 
+            "invalid_page_type"
+        )
+        
+        if result:
+            tool_names = [tool.name for tool in self.manager.tools]
+            
+            # 無効なページタイプの場合は汎用ページと同様に全ツールが含まれるべき
+            self.assertIn("aws_cost_analysis", tool_names)
+            self.assertIn("terraform_code_generator", tool_names)
 
 
 if __name__ == '__main__':
