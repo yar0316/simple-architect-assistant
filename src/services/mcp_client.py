@@ -12,6 +12,9 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import logging
+import hashlib
+import time
+from datetime import datetime, timedelta
 
 import streamlit as st
 import asyncio
@@ -22,6 +25,139 @@ try:
 except ImportError:
     MCP_AVAILABLE = False
     MultiServerMCPClient = None
+
+
+class MCPRequestCache:
+    """MCPリクエストのキャッシュ機構"""
+    
+    def __init__(self, default_ttl: int = 300):  # デフォルト5分
+        """
+        キャッシュを初期化
+        
+        Args:
+            default_ttl: デフォルトのTTL（秒）
+        """
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self.default_ttl = default_ttl
+        self.stats = {
+            "hits": 0,
+            "misses": 0,
+            "total_requests": 0,
+            "cache_size": 0
+        }
+        self.logger = logging.getLogger(__name__ + ".cache")
+        
+    def _generate_cache_key(self, method: str, *args, **kwargs) -> str:
+        """
+        リクエストパラメータからキャッシュキーを生成
+        
+        Args:
+            method: 呼び出しメソッド名
+            *args: 位置引数
+            **kwargs: キーワード引数
+            
+        Returns:
+            ハッシュ化されたキャッシュキー
+        """
+        # リクエストパラメータを文字列に変換
+        params_str = f"{method}:{str(args)}:{str(sorted(kwargs.items()))}"
+        
+        # SHA256でハッシュ化
+        cache_key = hashlib.sha256(params_str.encode('utf-8')).hexdigest()
+        
+        return cache_key
+    
+    def get(self, method: str, *args, **kwargs) -> Optional[Any]:
+        """
+        キャッシュから値を取得
+        
+        Args:
+            method: 呼び出しメソッド名
+            *args: 位置引数
+            **kwargs: キーワード引数
+            
+        Returns:
+            キャッシュされた値、または None
+        """
+        cache_key = self._generate_cache_key(method, *args, **kwargs)
+        self.stats["total_requests"] += 1
+        
+        if cache_key in self.cache:
+            cache_entry = self.cache[cache_key]
+            
+            # TTL チェック
+            if time.time() < cache_entry["expires_at"]:
+                self.stats["hits"] += 1
+                self.logger.debug(f"キャッシュヒット: {method} - キー: {cache_key[:8]}...")
+                return cache_entry["value"]
+            else:
+                # 期限切れのエントリを削除
+                del self.cache[cache_key]
+                self.stats["cache_size"] = len(self.cache)
+                self.logger.debug(f"キャッシュ期限切れ: {method} - キー: {cache_key[:8]}...")
+        
+        self.stats["misses"] += 1
+        self.logger.debug(f"キャッシュミス: {method} - キー: {cache_key[:8]}...")
+        return None
+    
+    def set(self, method: str, value: Any, ttl: Optional[int] = None, *args, **kwargs) -> None:
+        """
+        値をキャッシュに保存
+        
+        Args:
+            method: 呼び出しメソッド名
+            value: 保存する値
+            ttl: TTL（秒）、Noneの場合はデフォルトTTLを使用
+            *args: 位置引数
+            **kwargs: キーワード引数
+        """
+        cache_key = self._generate_cache_key(method, *args, **kwargs)
+        expires_at = time.time() + (ttl or self.default_ttl)
+        
+        self.cache[cache_key] = {
+            "value": value,
+            "expires_at": expires_at,
+            "created_at": time.time(),
+            "method": method
+        }
+        
+        self.stats["cache_size"] = len(self.cache)
+        self.logger.debug(f"キャッシュ保存: {method} - キー: {cache_key[:8]}... - TTL: {ttl or self.default_ttl}秒")
+    
+    def clear(self) -> None:
+        """キャッシュをクリア"""
+        self.cache.clear()
+        self.stats["cache_size"] = 0
+        self.logger.info("キャッシュをクリアしました")
+    
+    def cleanup_expired(self) -> int:
+        """期限切れのキャッシュエントリを削除"""
+        current_time = time.time()
+        expired_keys = [
+            key for key, entry in self.cache.items()
+            if current_time >= entry["expires_at"]
+        ]
+        
+        for key in expired_keys:
+            del self.cache[key]
+        
+        self.stats["cache_size"] = len(self.cache)
+        
+        if expired_keys:
+            self.logger.info(f"期限切れキャッシュエントリを {len(expired_keys)} 個削除しました")
+        
+        return len(expired_keys)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """キャッシュ統計を取得"""
+        total_requests = self.stats["total_requests"]
+        hit_rate = (self.stats["hits"] / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            **self.stats,
+            "hit_rate": round(hit_rate, 2),
+            "cache_entries": len(self.cache)
+        }
 
 
 class MCPClientService:
@@ -40,6 +176,9 @@ class MCPClientService:
         self.mcp_client = None
         self.mcp_tools = {}
         self.config = self._load_config()
+        
+        # リクエストキャッシュを初期化
+        self.request_cache = MCPRequestCache(default_ttl=300)  # 5分のデフォルトTTL
         
     def _get_default_config_path(self) -> str:
         """デフォルトの設定ファイルパスを取得"""
@@ -252,20 +391,32 @@ class MCPClientService:
         Returns:
             ガイダンス内容、またはエラー時はNone
         """
+        # キャッシュから確認
+        cached_result = self.request_cache.get("get_core_mcp_guidance", prompt)
+        if cached_result is not None:
+            return cached_result
+        
         # MCP統合が完全に動作するまでは、静的なガイダンスを返す
         try:
             # 将来的にはMCPサーバーから動的に取得
             # result = self.call_mcp_tool("awslabs.core-mcp-server", "prompt_understanding", prompt=prompt)
             
             # 現在は基本的なガイダンスを提供
+            result = None
             if any(keyword in prompt.lower() for keyword in ["vpc", "network", "subnet"]):
-                return "VPC設計では、パブリック/プライベートサブネットの分離、マルチAZ構成、適切なルーティング設定を考慮してください。"
+                result = "VPC設計では、パブリック/プライベートサブネットの分離、マルチAZ構成、適切なルーティング設定を考慮してください。"
             elif any(keyword in prompt.lower() for keyword in ["lambda", "serverless"]):
-                return "サーバーレス構成では、イベント駆動設計、適切な権限設定、コールドスタート対策を考慮してください。"
+                result = "サーバーレス構成では、イベント駆動設計、適切な権限設定、コールドスタート対策を考慮してください。"
             elif any(keyword in prompt.lower() for keyword in ["rds", "database"]):
-                return "データベース設計では、マルチAZ、バックアップ戦略、セキュリティグループ、暗号化を考慮してください。"
+                result = "データベース設計では、マルチAZ、バックアップ戦略、セキュリティグループ、暗号化を考慮してください。"
             else:
-                return "AWS Well-Architected Frameworkに基づき、信頼性、セキュリティ、コスト効率、パフォーマンスを考慮した設計を心がけてください。"
+                result = "AWS Well-Architected Frameworkに基づき、信頼性、セキュリティ、コスト効率、パフォーマンスを考慮した設計を心がけてください。"
+            
+            # 結果をキャッシュに保存（ガイダンスは比較的長期間有効）
+            if result:
+                self.request_cache.set("get_core_mcp_guidance", result, 600, prompt)  # 10分キャッシュ
+            
+            return result
                 
         except Exception as e:
             self.logger.error(f"Core MCPガイダンス取得エラー: {e}")
@@ -281,6 +432,11 @@ class MCPClientService:
         Returns:
             ドキュメント情報、またはエラー時はNone
         """
+        # キャッシュから確認
+        cached_result = self.request_cache.get("get_aws_documentation", query)
+        if cached_result is not None:
+            return cached_result
+        
         # MCP統合が完全に動作するまでは、基本的な情報を返す
         try:
             # 将来的にはMCPサーバーから動的に取得
@@ -294,11 +450,20 @@ class MCPClientService:
                 "lambda": "AWS Lambdaは、サーバーのプロビジョニングや管理なしにコードを実行できるコンピューティングサービスです。"
             }
             
+            result = None
             for service, description in common_services.items():
                 if service in query.lower():
-                    return {"service": service, "description": description, "source": "local_cache"}
+                    result = {"service": service, "description": description, "source": "local_cache"}
+                    break
             
-            return {"general": "AWS公式ドキュメントを参照することをお勧めします。", "source": "local_cache"}
+            if result is None:
+                result = {"general": "AWS公式ドキュメントを参照することをお勧めします。", "source": "local_cache"}
+            
+            # 結果をキャッシュに保存（ドキュメント情報は長期間有効）
+            if result:
+                self.request_cache.set("get_aws_documentation", result, 1800, query)  # 30分キャッシュ
+            
+            return result
             
         except Exception as e:
             self.logger.error(f"AWS ドキュメント取得エラー: {e}")
@@ -314,14 +479,20 @@ class MCPClientService:
         Returns:
             生成されたTerraformコード、またはエラー時はNone
         """
+        # キャッシュから確認
+        cached_result = self.request_cache.get("generate_terraform_code", requirements)
+        if cached_result is not None:
+            return cached_result
+        
         # MCP統合が完全に動作するまでは、基本的なテンプレートを返す
         try:
             # 将来的にはMCPサーバーから動的に取得
             # result = self.call_mcp_tool("awslabs.terraform-mcp-server", "generate_terraform", requirements=requirements)
             
             # 現在は基本的なTerraformテンプレートを提供
+            result = None
             if "vpc" in requirements.lower():
-                return '''
+                result = '''
 # VPC基本構成テンプレート
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -353,7 +524,7 @@ resource "aws_internet_gateway" "main" {
 }
 '''
             elif "lambda" in requirements.lower():
-                return '''
+                result = '''
 # Lambda基本構成テンプレート
 resource "aws_lambda_function" "main" {
   filename         = "lambda.zip"
@@ -386,11 +557,29 @@ resource "aws_iam_role" "lambda_role" {
 }
 '''
             else:
-                return "# 詳細な要件を指定してください。MCP統合により、より具体的なTerraformコードが生成されます。"
+                result = "# 詳細な要件を指定してください。MCP統合により、より具体的なTerraformコードが生成されます。"
+            
+            # 結果をキャッシュに保存（Terraformコードは短期間有効）
+            if result:
+                self.request_cache.set("generate_terraform_code", result, 180, requirements)  # 3分キャッシュ
+            
+            return result
                 
         except Exception as e:
             self.logger.error(f"Terraform コード生成エラー: {e}")
             return None
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """キャッシュ統計を取得"""
+        return self.request_cache.get_stats()
+    
+    def clear_cache(self) -> None:
+        """キャッシュをクリア"""
+        self.request_cache.clear()
+        
+    def cleanup_expired_cache(self) -> int:
+        """期限切れキャッシュを削除"""
+        return self.request_cache.cleanup_expired()
 
 
 # Streamlit用のセッション管理
