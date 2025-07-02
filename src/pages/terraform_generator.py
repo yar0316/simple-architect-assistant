@@ -13,7 +13,7 @@ try:
     from services.mcp_client import get_mcp_client
     from ui.streamlit_ui import display_chat_history
     from langchain_integration.agent_executor import create_aws_agent_executor
-    from langchain_integration.mcp_tools import LangChainMCPManager
+    from langchain_integration.mcp_tools import LangChainMCPManager, PAGE_TYPE_TERRAFORM_GENERATOR
 except ImportError as e:
     st.error(f"モジュールのインポートに失敗しました: {e}")
     st.stop()
@@ -155,13 +155,17 @@ with st.sidebar:
     # エージェントモード設定
     st.header("🤖 AI エージェントモード")
     
+    # 既存設定の移行処理: enable_terraform_agent_mode -> enable_agent_mode
+    if "enable_terraform_agent_mode" in st.session_state and "enable_agent_mode" not in st.session_state:
+        st.session_state.enable_agent_mode = st.session_state.enable_terraform_agent_mode
+    
     # エージェントモードの有効/無効
     enable_agent_mode = st.toggle(
         "エージェントモードを有効化 (Beta)",
-        value=st.session_state.get("enable_terraform_agent_mode", False),
+        value=st.session_state.get("enable_agent_mode", True),
         help="LangChainエージェントが自律的にツールを選択・実行してTerraformコード生成を支援します。複雑な構成の場合に適していますが、応答時間が長くなる場合があります。"
     )
-    st.session_state.enable_terraform_agent_mode = enable_agent_mode
+    st.session_state.enable_agent_mode = enable_agent_mode
     
     if enable_agent_mode:
         # エージェント初期化
@@ -181,8 +185,8 @@ with st.sidebar:
                         # 既存のMCPClientServiceを取得
                         existing_mcp_client = get_mcp_client()
                         
-                        # 既存MCPクライアントとの統合を試行
-                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client)
+                        # 既存MCPクライアントとの統合を試行（terraform_generatorページ特化）
+                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client, PAGE_TYPE_TERRAFORM_GENERATOR)
                         
                         if mcp_init_success:
                             tools_count = len(mcp_manager.get_all_tools())
@@ -314,7 +318,7 @@ with col1:
             full_response = ""
             
             # エージェントモードが有効で、エージェントが利用可能な場合
-            if (st.session_state.get("enable_terraform_agent_mode", False) and 
+            if (st.session_state.get("enable_agent_mode", False) and 
                 st.session_state.get("terraform_agent_executor") and 
                 st.session_state.terraform_agent_executor.is_initialized):
                 
@@ -344,7 +348,7 @@ with col1:
                         
             else:
                 # 手動モード（従来の処理）
-                if st.session_state.get("enable_terraform_agent_mode", False):
+                if st.session_state.get("enable_agent_mode", False):
                     st.warning("⚠️ エージェントが利用できないため、手動モードで処理します")
                 
                 with st.spinner("Terraformコードを生成中です..."):

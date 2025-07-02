@@ -4,6 +4,11 @@ import streamlit as st
 from typing import List, Dict, Any, Optional
 import logging
 
+# Page type constants
+PAGE_TYPE_AWS_CHAT = "aws_chat"
+PAGE_TYPE_TERRAFORM_GENERATOR = "terraform_generator" 
+PAGE_TYPE_GENERAL = "general"
+
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from langchain_core.tools import BaseTool
@@ -26,10 +31,15 @@ class LangChainMCPManager:
         self.connected_servers: List[str] = []
         self.mcp_available = LANGCHAIN_MCP_AVAILABLE
     
-    def initialize_with_existing_mcp(self, mcp_client_service) -> bool:
-        """既存のMCPClientServiceを使用して初期化"""
+    def initialize_with_existing_mcp(self, mcp_client_service, page_type: str = PAGE_TYPE_GENERAL) -> bool:
+        """既存のMCPClientServiceを使用して初期化
+        
+        Args:
+            mcp_client_service: MCPクライアントサービス
+            page_type: ページタイプ (PAGE_TYPE_AWS_CHAT, PAGE_TYPE_TERRAFORM_GENERATOR, PAGE_TYPE_GENERAL)
+        """
         try:
-            logging.info("既存のMCPClientServiceとの統合を開始")
+            logging.info(f"既存のMCPClientServiceとの統合を開始 (ページタイプ: {page_type})")
             
             # 既存のMCPクライアントからツールを作成
             available_tools = mcp_client_service.get_available_tools()
@@ -38,29 +48,34 @@ class LangChainMCPManager:
             if not available_tools:
                 logging.warning("既存MCPクライアントにツールがありません - フォールバック機能を提供")
                 # ツールが無くても基本的なフォールバック機能を提供
-                self.tools = self._create_tools_from_mcp_client(mcp_client_service)
+                self.tools = self._create_tools_from_mcp_client(mcp_client_service, page_type)
                 self.connected_servers = []
                 return len(self.tools) > 0
             
-            # MCPClientServiceをラップしてLangChainツールを作成
-            self.tools = self._create_tools_from_mcp_client(mcp_client_service)
+            # MCPClientServiceをラップしてLangChainツールを作成（ページ特化）
+            self.tools = self._create_tools_from_mcp_client(mcp_client_service, page_type)
             self.connected_servers = available_tools
             
-            logging.info(f"既存MCP統合成功: {len(self.tools)}個のツール, {len(self.connected_servers)}個のサーバー")
+            logging.info(f"既存MCP統合成功: {len(self.tools)}個のツール, {len(self.connected_servers)}個のサーバー (ページタイプ: {page_type})")
             return True
             
         except Exception as e:
             logging.error(f"既存MCP統合エラー: {e}")
             return False
     
-    def _create_tools_from_mcp_client(self, mcp_client_service):
-        """MCPClientServiceをラップしてLangChainツールを作成"""
+    def _create_tools_from_mcp_client(self, mcp_client_service, page_type: str = PAGE_TYPE_GENERAL):
+        """MCPClientServiceをラップしてLangChainツールを作成
+        
+        Args:
+            mcp_client_service: MCPクライアントサービス
+            page_type: ページタイプ (PAGE_TYPE_AWS_CHAT, PAGE_TYPE_TERRAFORM_GENERATOR, PAGE_TYPE_GENERAL)
+        """
         from langchain_core.tools import Tool
         
         tools = []
         
         try:
-            # AWS Documentation検索ツール
+            # AWS Documentation検索ツール（共通）
             def aws_docs_search(query: str) -> str:
                 """AWS公式ドキュメントを検索"""
                 result = mcp_client_service.get_aws_documentation(query)
@@ -68,7 +83,7 @@ class LangChainMCPManager:
                     return f"検索結果: {result.get('description', 'N/A')} (出典: {result.get('source', 'AWS公式')})"
                 return f"AWS {query} に関する基本的な情報を参照してください。"
             
-            # Core MCP ガイダンスツール
+            # Core MCP ガイダンスツール（共通）
             def core_guidance(prompt: str) -> str:
                 """AWS構成に関するガイダンスを取得"""
                 guidance = mcp_client_service.get_core_mcp_guidance(prompt)
@@ -76,15 +91,43 @@ class LangChainMCPManager:
                     return f"推奨事項: {guidance}"
                 return "AWS Well-Architected Frameworkに基づいた設計を推奨します。"
             
-            # Terraformコード生成ツール
-            def terraform_generate(requirements: str) -> str:
+            # コスト分析ツール（aws_chatページ特化）
+            def cost_analysis(service_requirements: str) -> str:
+                """AWS構成のコスト分析を実行"""
+                try:
+                    # Core MCPからコスト関連ガイダンスを取得
+                    cost_guidance = mcp_client_service.get_core_mcp_guidance(f"コスト最適化 {service_requirements}")
+                    
+                    # AWS Documentationからコスト情報を検索
+                    cost_docs = mcp_client_service.get_aws_documentation(f"pricing cost calculator {service_requirements}")
+                    
+                    result = "💰 **コスト分析結果**\n\n"
+                    
+                    if cost_guidance:
+                        result += f"**コスト最適化ガイダンス:**\n{cost_guidance}\n\n"
+                    
+                    if cost_docs:
+                        result += f"**料金情報:**\n{cost_docs.get('description', 'N/A')}\n\n"
+                    
+                    result += "**推奨事項:**\n"
+                    result += "- リザーブドインスタンスでの長期利用割引検討\n"
+                    result += "- Spot インスタンスでの開発環境コスト削減\n"
+                    result += "- CloudWatch でのリソース使用率監視\n"
+                    result += "- Auto Scaling でのリソース最適化"
+                    
+                    return result
+                except Exception as e:
+                    return f"コスト分析エラー: {str(e)}。基本的なコスト最適化手法を検討してください。"
+            
+            # Terraformコード生成ツール（terraform_generatorページ特化）
+            def terraform_code_generator(requirements: str) -> str:
                 """Terraformコードを生成"""
                 code = mcp_client_service.generate_terraform_code(requirements)
                 if code:
                     return f"生成されたTerraformコード:\n```hcl\n{code}\n```"
                 return "Terraformコード生成には詳細な要件指定が必要です。"
             
-            # ツールを作成
+            # 共通ツールを追加
             tools.append(Tool(
                 name="aws_documentation_search",
                 description="AWS公式ドキュメントからサービス情報を検索します。引数: query (検索するAWSサービス名)",
@@ -97,13 +140,40 @@ class LangChainMCPManager:
                 func=core_guidance
             ))
             
-            tools.append(Tool(
-                name="terraform_code_generator",
-                description="AWS構成のTerraformコードを生成します。引数: requirements (実装要件)",
-                func=terraform_generate
-            ))
+            # ページ特化ツールを追加
+            if page_type == PAGE_TYPE_AWS_CHAT:
+                # aws_chatページ: コスト分析に特化
+                tools.append(Tool(
+                    name="aws_cost_analysis",
+                    description="AWS構成のコスト分析と最適化提案を行います。引数: service_requirements (対象サービスと要件)",
+                    func=cost_analysis
+                ))
+                logging.info("aws_chatページ特化: コスト分析ツールを追加")
+                
+            elif page_type == PAGE_TYPE_TERRAFORM_GENERATOR:
+                # terraform_generatorページ: Terraformコード生成に特化
+                tools.append(Tool(
+                    name="terraform_code_generator",
+                    description="AWS構成のTerraformコードを生成します。引数: requirements (実装要件)",
+                    func=terraform_code_generator
+                ))
+                logging.info("terraform_generatorページ特化: Terraformコード生成ツールを追加")
+                
+            else:
+                # 汎用ページ: 全ツールを追加
+                tools.append(Tool(
+                    name="aws_cost_analysis",
+                    description="AWS構成のコスト分析と最適化提案を行います。引数: service_requirements (対象サービスと要件)",
+                    func=cost_analysis
+                ))
+                tools.append(Tool(
+                    name="terraform_code_generator",
+                    description="AWS構成のTerraformコードを生成します。引数: requirements (実装要件)",
+                    func=terraform_code_generator
+                ))
+                logging.info("汎用ページ: 全ツールを追加")
             
-            logging.info(f"MCPClientService統合ツール作成完了: {len(tools)}個")
+            logging.info(f"MCPClientService統合ツール作成完了: {len(tools)}個 (ページタイプ: {page_type})")
             
         except Exception as e:
             logging.error(f"MCPツール作成エラー: {e}")

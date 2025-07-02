@@ -23,7 +23,7 @@ try:
     from services.bedrock_service import BedrockService
     from services.mcp_client import get_mcp_client
     from langchain_integration.agent_executor import create_aws_agent_executor
-    from langchain_integration.mcp_tools import LangChainMCPManager
+    from langchain_integration.mcp_tools import LangChainMCPManager, PAGE_TYPE_AWS_CHAT
 except ImportError as e:
     st.error(f"モジュールのインポートに失敗しました: {e}")
     st.stop()
@@ -124,7 +124,7 @@ with st.sidebar:
     # エージェントモードの有効/無効
     enable_agent_mode = st.toggle(
         "エージェントモードを有効化 (Beta)",
-        value=st.session_state.get("enable_agent_mode", False),
+        value=st.session_state.get("enable_agent_mode", True),
         help="LangChainエージェントが自律的にツールを選択・実行します。複雑な問い合わせに適していますが、応答時間が長くなる場合があります。"
     )
     st.session_state.enable_agent_mode = enable_agent_mode
@@ -147,8 +147,8 @@ with st.sidebar:
                         # 既存のMCPClientServiceを取得
                         existing_mcp_client = get_mcp_client()
                         
-                        # 既存MCPクライアントとの統合を試行
-                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client)
+                        # 既存MCPクライアントとの統合を試行（aws_chatページ特化）
+                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client, PAGE_TYPE_AWS_CHAT)
                         
                         if mcp_init_success:
                             tools_count = len(mcp_manager.get_all_tools())

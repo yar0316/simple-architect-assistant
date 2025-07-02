@@ -43,7 +43,7 @@ AWS MCP Serversを活用し、AWSインフラの構成検討からコード化�
 
 **入力例**:
 
-```
+```txt
 「月間1万ユーザーのWebアプリケーションを構築したいです。
 データベースはPostgreSQLを使用し、高可用性が必要です。」
 ```
@@ -69,14 +69,14 @@ AWS MCP Serversを活用し、AWSインフラの構成検討からコード化�
 
 **入力例**:
 
-```
+```txt
 「ALB + ECS Fargate + RDS PostgreSQLの構成で、
 開発・本番環境を分けたTerraformコードを作成してください」
 ```
 
 **出力例**:
 
-```
+```txt
 terraform/
 ├── environments/
 │   ├── dev/
@@ -251,7 +251,7 @@ await core_mcp.write_file(
 
 #### 5.1.1 メインページレイアウト
 
-```
+```txt
 ┌─────────────────────────────────┐
 │ Simple Architect Assistant      │
 ├─────────────────────────────────┤
@@ -301,7 +301,7 @@ await core_mcp.write_file(
 
 #### 5.2.1 構成提案＆コスト計算フロー
 
-```
+```txt
 1. 要件入力 → 2. MCP処理 → 3. 結果表示 → 4. 詳細確認
    ↓              ↓            ↓            ↓
 「Webアプリ構築」 → ドキュメント参照 → 構成案提示 → コスト詳細
@@ -310,7 +310,7 @@ await core_mcp.write_file(
 
 #### 5.2.2 Terraformコード生成フロー
 
-```
+```txt
 1. 構成指定 → 2. コード生成 → 3. プレビュー → 4. ダウンロード
    ↓            ↓            ↓            ↓
 「ECS+RDS」 → Terraform MCP → コード表示 → ファイル出力
