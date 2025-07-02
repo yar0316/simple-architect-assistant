@@ -155,6 +155,10 @@ with st.sidebar:
     # エージェントモード設定
     st.header("🤖 AI エージェントモード")
     
+    # 既存設定の移行処理: enable_terraform_agent_mode -> enable_agent_mode
+    if "enable_terraform_agent_mode" in st.session_state and "enable_agent_mode" not in st.session_state:
+        st.session_state.enable_agent_mode = st.session_state.enable_terraform_agent_mode
+    
     # エージェントモードの有効/無効
     enable_agent_mode = st.toggle(
         "エージェントモードを有効化 (Beta)",
