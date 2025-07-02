@@ -173,7 +173,7 @@ class AWSAgentExecutor:
                 memory=self.memory,
                 verbose=True,
                 max_iterations=10,
-                early_stopping_method="generate",
+                early_stopping_method="force",
                 handle_parsing_errors=True
             )
             
