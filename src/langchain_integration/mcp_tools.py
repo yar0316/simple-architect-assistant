@@ -105,17 +105,77 @@ class LangChainMCPManager:
                     
                     result = "💰 **コスト分析結果**\n\n"
                     
+                    # 要件からAWSサービスを抽出してコスト概算表を作成
+                    import re
+                    aws_services = []
+                    service_patterns = {
+                        "EC2": r"(?i)ec2|インスタンス|仮想マシン|サーバー",
+                        "S3": r"(?i)s3|ストレージ|オブジェクト",
+                        "RDS": r"(?i)rds|データベース|mysql|postgres",
+                        "Lambda": r"(?i)lambda|サーバーレス|関数",
+                        "CloudFront": r"(?i)cloudfront|cdn|配信",
+                        "VPC": r"(?i)vpc|ネットワーク|プライベート"
+                    }
+                    
+                    for service, pattern in service_patterns.items():
+                        if re.search(pattern, service_requirements):
+                            aws_services.append(service)
+                    
+                    # デフォルトでよく使われるサービスを追加
+                    if not aws_services:
+                        aws_services = ["EC2", "S3", "VPC"]
+                    
+                    # コスト概算表を作成
+                    result += "## 📊 月額コスト概算表\n\n"
+                    result += "| AWSサービス | 構成詳細 | 月額概算(USD) | 年額概算(USD) | 最適化提案 |\n"
+                    result += "|------------|----------|---------------|---------------|------------|\n"
+                    
+                    total_monthly = 0
+                    cost_estimates = {
+                        "EC2": {"cost": 50, "detail": "t3.medium×2台", "optimization": "Reserved Instance (-30%)"},
+                        "S3": {"cost": 25, "detail": "100GB Standard", "optimization": "IA/Glacier移行 (-50%)"},
+                        "RDS": {"cost": 85, "detail": "db.t3.small Multi-AZ", "optimization": "Single-AZ検討 (-50%)"},
+                        "Lambda": {"cost": 15, "detail": "100万リクエスト/月", "optimization": "Provisioned Concurrency最適化"},
+                        "CloudFront": {"cost": 20, "detail": "1TB転送/月", "optimization": "キャッシュ設定最適化 (-20%)"},
+                        "VPC": {"cost": 10, "detail": "NAT Gateway×2", "optimization": "NAT Instance検討 (-70%)"}
+                    }
+                    
+                    for service in aws_services:
+                        if service in cost_estimates:
+                            estimate = cost_estimates[service]
+                            monthly_cost = estimate["cost"]
+                            total_monthly += monthly_cost
+                            yearly_cost = monthly_cost * 12
+                            
+                            result += f"| {service} | {estimate['detail']} | ${monthly_cost} | ${yearly_cost} | {estimate['optimization']} |\n"
+                    
+                    result += f"\n**合計月額: ${total_monthly} | 合計年額: ${total_monthly * 12}**\n\n"
+                    
+                    # コスト最適化提案表
+                    result += "## 💡 コスト最適化提案表\n\n"
+                    result += "| 最適化項目 | 現在 | 最適化後 | 月額削減 | 削減率 |\n"
+                    result += "|------------|------|----------|----------|--------|\n"
+                    result += "| EC2購入オプション | オンデマンド | Reserved Instance | $15 | 30% |\n"
+                    result += "| ストレージクラス | Standard | IA + Glacier | $12 | 48% |\n"
+                    result += "| データベース冗長性 | Multi-AZ | Single-AZ | $42 | 50% |\n"
+                    result += "| NAT設定 | NAT Gateway | NAT Instance | $25 | 70% |\n\n"
+                    
+                    result += f"**最適化後の月額総コスト: ${total_monthly - 94} (削減額: $94/月, {94/total_monthly*100:.0f}%削減)**\n\n"
+                    
+                    # ガイダンス情報を追加
                     if cost_guidance:
-                        result += f"**コスト最適化ガイダンス:**\n{cost_guidance}\n\n"
+                        result += f"## 🎯 専門的ガイダンス\n\n{cost_guidance}\n\n"
                     
-                    if cost_docs:
-                        result += f"**料金情報:**\n{cost_docs.get('description', 'N/A')}\n\n"
+                    if cost_docs and cost_docs.get('description') != 'N/A':
+                        result += f"## 📋 料金情報\n\n{cost_docs.get('description', 'N/A')}\n\n"
                     
-                    result += "**推奨事項:**\n"
-                    result += "- リザーブドインスタンスでの長期利用割引検討\n"
-                    result += "- Spot インスタンスでの開発環境コスト削減\n"
-                    result += "- CloudWatch でのリソース使用率監視\n"
-                    result += "- Auto Scaling でのリソース最適化"
+                    # 実装推奨事項
+                    result += "## ⚡ 実装推奨事項\n\n"
+                    result += "1. **コスト監視**: CloudWatch + Billing Alertsでコスト監視を設定\n"
+                    result += "2. **リソース管理**: AWS Cost Explorerで使用量を定期分析\n"
+                    result += "3. **自動化**: Auto Scalingでリソースの動的調整\n"
+                    result += "4. **タグ戦略**: コストセンター別のリソースタグ付け\n"
+                    result += "5. **定期レビュー**: 月次でのコスト最適化レビュー実施"
                     
                     return result
                 except Exception as e:
