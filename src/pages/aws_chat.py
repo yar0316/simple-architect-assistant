@@ -23,7 +23,7 @@ try:
     from services.bedrock_service import BedrockService
     from services.mcp_client import get_mcp_client
     from langchain_integration.agent_executor import create_aws_agent_executor
-    from langchain_integration.mcp_tools import LangChainMCPManager
+    from langchain_integration.mcp_tools import LangChainMCPManager, PAGE_TYPE_AWS_CHAT
 except ImportError as e:
     st.error(f"モジュールのインポートに失敗しました: {e}")
     st.stop()
@@ -148,7 +148,7 @@ with st.sidebar:
                         existing_mcp_client = get_mcp_client()
                         
                         # 既存MCPクライアントとの統合を試行（aws_chatページ特化）
-                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client, "aws_chat")
+                        mcp_init_success = mcp_manager.initialize_with_existing_mcp(existing_mcp_client, PAGE_TYPE_AWS_CHAT)
                         
                         if mcp_init_success:
                             tools_count = len(mcp_manager.get_all_tools())

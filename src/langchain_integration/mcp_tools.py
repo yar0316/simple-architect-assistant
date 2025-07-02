@@ -4,6 +4,11 @@ import streamlit as st
 from typing import List, Dict, Any, Optional
 import logging
 
+# Page type constants
+PAGE_TYPE_AWS_CHAT = "aws_chat"
+PAGE_TYPE_TERRAFORM_GENERATOR = "terraform_generator" 
+PAGE_TYPE_GENERAL = "general"
+
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from langchain_core.tools import BaseTool
@@ -26,12 +31,12 @@ class LangChainMCPManager:
         self.connected_servers: List[str] = []
         self.mcp_available = LANGCHAIN_MCP_AVAILABLE
     
-    def initialize_with_existing_mcp(self, mcp_client_service, page_type: str = "general") -> bool:
+    def initialize_with_existing_mcp(self, mcp_client_service, page_type: str = PAGE_TYPE_GENERAL) -> bool:
         """既存のMCPClientServiceを使用して初期化
         
         Args:
             mcp_client_service: MCPクライアントサービス
-            page_type: ページタイプ ("aws_chat", "terraform_generator", "general")
+            page_type: ページタイプ (PAGE_TYPE_AWS_CHAT, PAGE_TYPE_TERRAFORM_GENERATOR, PAGE_TYPE_GENERAL)
         """
         try:
             logging.info(f"既存のMCPClientServiceとの統合を開始 (ページタイプ: {page_type})")
@@ -63,7 +68,7 @@ class LangChainMCPManager:
         
         Args:
             mcp_client_service: MCPクライアントサービス
-            page_type: ページタイプ ("aws_chat", "terraform_generator", "general")
+            page_type: ページタイプ (PAGE_TYPE_AWS_CHAT, PAGE_TYPE_TERRAFORM_GENERATOR, PAGE_TYPE_GENERAL)
         """
         from langchain_core.tools import Tool
         
@@ -136,7 +141,7 @@ class LangChainMCPManager:
             ))
             
             # ページ特化ツールを追加
-            if page_type == "aws_chat":
+            if page_type == PAGE_TYPE_AWS_CHAT:
                 # aws_chatページ: コスト分析に特化
                 tools.append(Tool(
                     name="aws_cost_analysis",
@@ -145,7 +150,7 @@ class LangChainMCPManager:
                 ))
                 logging.info("aws_chatページ特化: コスト分析ツールを追加")
                 
-            elif page_type == "terraform_generator":
+            elif page_type == PAGE_TYPE_TERRAFORM_GENERATOR:
                 # terraform_generatorページ: Terraformコード生成に特化
                 tools.append(Tool(
                     name="terraform_code_generator",
