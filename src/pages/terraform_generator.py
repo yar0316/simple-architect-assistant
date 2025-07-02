@@ -158,10 +158,10 @@ with st.sidebar:
     # エージェントモードの有効/無効
     enable_agent_mode = st.toggle(
         "エージェントモードを有効化 (Beta)",
-        value=st.session_state.get("enable_terraform_agent_mode", True),
+        value=st.session_state.get("enable_agent_mode", True),
         help="LangChainエージェントが自律的にツールを選択・実行してTerraformコード生成を支援します。複雑な構成の場合に適していますが、応答時間が長くなる場合があります。"
     )
-    st.session_state.enable_terraform_agent_mode = enable_agent_mode
+    st.session_state.enable_agent_mode = enable_agent_mode
     
     if enable_agent_mode:
         # エージェント初期化
@@ -314,7 +314,7 @@ with col1:
             full_response = ""
             
             # エージェントモードが有効で、エージェントが利用可能な場合
-            if (st.session_state.get("enable_terraform_agent_mode", False) and 
+            if (st.session_state.get("enable_agent_mode", False) and 
                 st.session_state.get("terraform_agent_executor") and 
                 st.session_state.terraform_agent_executor.is_initialized):
                 
@@ -344,7 +344,7 @@ with col1:
                         
             else:
                 # 手動モード（従来の処理）
-                if st.session_state.get("enable_terraform_agent_mode", False):
+                if st.session_state.get("enable_agent_mode", False):
                     st.warning("⚠️ エージェントが利用できないため、手動モードで処理します")
                 
                 with st.spinner("Terraformコードを生成中です..."):

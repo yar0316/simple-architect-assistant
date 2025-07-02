@@ -115,7 +115,7 @@ class LangChainMCPManager:
                     return f"コスト分析エラー: {str(e)}。基本的なコスト最適化手法を検討してください。"
             
             # Terraformコード生成ツール（terraform_generatorページ特化）
-            def terraform_generate(requirements: str) -> str:
+            def terraform_code_generator(requirements: str) -> str:
                 """Terraformコードを生成"""
                 code = mcp_client_service.generate_terraform_code(requirements)
                 if code:
@@ -150,7 +150,7 @@ class LangChainMCPManager:
                 tools.append(Tool(
                     name="terraform_code_generator",
                     description="AWS構成のTerraformコードを生成します。引数: requirements (実装要件)",
-                    func=terraform_generate
+                    func=terraform_code_generator
                 ))
                 logging.info("terraform_generatorページ特化: Terraformコード生成ツールを追加")
                 
@@ -164,7 +164,7 @@ class LangChainMCPManager:
                 tools.append(Tool(
                     name="terraform_code_generator",
                     description="AWS構成のTerraformコードを生成します。引数: requirements (実装要件)",
-                    func=terraform_generate
+                    func=terraform_code_generator
                 ))
                 logging.info("汎用ページ: 全ツールを追加")
             
