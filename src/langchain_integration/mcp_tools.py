@@ -79,9 +79,11 @@ class LangChainMCPManager:
             def aws_docs_search(query: str) -> str:
                 """AWS公式ドキュメントを検索"""
                 result = mcp_client_service.get_aws_documentation(query)
-                if result:
+                if result and result.get('description') and result.get('description') != 'N/A':
                     return f"検索結果: {result.get('description', 'N/A')} (出典: {result.get('source', 'AWS公式')})"
-                return f"AWS {query} に関する基本的な情報を参照してください。"
+                
+                # より具体的で次の行動を促すメッセージを返す
+                return f"'{query}' に関する詳細なドキュメントが見つかりませんでした。代わりに別のキーワードで検索するか、aws_guidanceツールを使用して一般的な推奨事項を取得してください。これまでに収集した情報で十分な場合は、最終回答を作成してください。"
             
             # Core MCP ガイダンスツール（共通）
             def core_guidance(prompt: str) -> str:

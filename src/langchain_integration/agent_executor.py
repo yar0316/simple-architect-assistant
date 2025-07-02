@@ -172,9 +172,10 @@ class AWSAgentExecutor:
                 tools=self.tools,
                 memory=self.memory,
                 verbose=True,
-                max_iterations=10,
+                max_iterations=7,  # 無限ループ防止のため削減
                 early_stopping_method="force",
-                handle_parsing_errors=True
+                handle_parsing_errors=True,
+                return_intermediate_steps=True  # 中間ステップを返して繰り返し検知を可能にする
             )
             
             self.is_initialized = True
