@@ -19,6 +19,9 @@ from datetime import datetime, timedelta
 import streamlit as st
 import asyncio
 
+# 新しいAWSServiceCodeHelperをインポート
+from .aws_service_code_helper import get_service_code_helper
+
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     MCP_AVAILABLE = True
@@ -597,13 +600,42 @@ resource "aws_iam_role" "lambda_role" {
             return cached_result
         
         try:
-            # 実際のCost Analysis MCP Serverを呼び出し
-            service_name = service_config.get("service_name", "").upper()
+            # AWSServiceCodeHelperを使用して正しいサービスコードを取得
+            service_name_input = service_config.get("service_name", "")
             region = service_config.get("region", "us-east-1")
             instance_type = service_config.get("instance_type")
             
+            # サービスコードヘルパーからサービスコードを取得
+            service_code_helper = get_service_code_helper()
+            service_code = service_code_helper.find_service_code(service_name_input)
+            
+            if not service_code:
+                # サービスコードが見つからない場合、候補を提案
+                suggestions = service_code_helper.search_services(service_name_input[:5])
+                self.logger.warning(f"サービスコードが見つかりません: {service_name_input}")
+                if suggestions:
+                    self.logger.info(f"候補サービス: {[s['service_name'] for s in suggestions[:3]]}")
+                
+                # フォールバック処理
+                return self._calculate_fallback_cost_estimate(service_name_input.upper(), region, instance_type)
+            
+            # 有効なリージョンをチェック
+            valid_regions = [
+                "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+                "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1",
+                "ap-northeast-1", "ap-northeast-2", "ap-southeast-1", "ap-southeast-2",
+                "ap-south-1", "ca-central-1", "sa-east-1"
+            ]
+            
+            if region not in valid_regions:
+                self.logger.warning(f"無効なリージョン: {region}, デフォルトのus-east-1を使用")
+                region = "us-east-1"
+            
             # Cost Analysis MCP Serverに送信する自然言語クエリを作成
-            query = f"Provide cost estimate for AWS {service_name}"
+            service_info = service_code_helper.get_service_info(service_name_input)
+            display_name = service_info['service_name'] if service_info else service_name_input
+            
+            query = f"Provide cost estimate for AWS {display_name}"
             if instance_type:
                 query += f" using {instance_type} instance"
             query += f" in {region} region"
@@ -615,8 +647,9 @@ resource "aws_iam_role" "lambda_role" {
             
             # 最初にAPI経由で価格情報を取得
             try:
+                self.logger.debug(f"MCP API呼び出し: service_code={service_code}, region={region}")
                 mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_api", 
-                                              service_code=service_name, region=region)
+                                              service_code=service_code, region=region)
             except Exception as api_error:
                 self.logger.warning(f"API価格取得失敗、Web検索にフォールバック: {api_error}")
                 
@@ -629,7 +662,7 @@ resource "aws_iam_role" "lambda_role" {
             
             if mcp_result:
                 # MCPサーバーの結果を既存の形式に変換
-                result = self._convert_mcp_result_to_standard_format(mcp_result, service_name, instance_type, region)
+                result = self._convert_mcp_result_to_standard_format(mcp_result, service_code, instance_type, region)
                 
                 # 結果をキャッシュに保存（コスト見積もりは短期間有効）
                 if result:
@@ -637,18 +670,39 @@ resource "aws_iam_role" "lambda_role" {
                 
                 return result
             else:
-                # MCPサーバーからの応答が無効な場合はフォールバック
-                self.logger.info(f"MCPサーバーからの応答がない、フォールバック使用: {service_name}")
-                return self._calculate_fallback_cost_estimate(service_name, region, instance_type)
+                # Cost Analysis MCPが失敗した場合、AWS Documentation MCPから価格情報を取得
+                self.logger.info(f"Cost Analysis MCP失敗、AWS Documentation MCPを試行: {service_code}")
+                doc_result = self._get_pricing_from_aws_documentation(service_code, region, instance_type, display_name)
+                
+                if doc_result:
+                    # AWS Documentation MCPからの結果をキャッシュに保存
+                    self.request_cache.set("get_cost_estimation", doc_result, 300, cache_key_data)
+                    return doc_result
+                else:
+                    # AWS Documentation MCPも失敗した場合、最終フォールバック
+                    self.logger.info(f"AWS Documentation MCP失敗、最終フォールバック使用: {service_code}")
+                    return self._calculate_fallback_cost_estimate(service_code, region, instance_type)
                 
         except Exception as e:
             self.logger.error(f"Cost Analysis MCP Server呼び出しエラー: {e}")
-            # エラー時はフォールバック計算を使用
-            return self._calculate_fallback_cost_estimate(
-                service_config.get("service_name", "").upper(), 
-                service_config.get("region", "us-east-1"), 
-                service_config.get("instance_type")
-            )
+            # エラー時もAWS Documentation MCPを試行
+            service_name_input = service_config.get("service_name", "")
+            region = service_config.get("region", "us-east-1")
+            instance_type = service_config.get("instance_type")
+            
+            service_code_helper = get_service_code_helper()
+            service_code = service_code_helper.find_service_code(service_name_input) or service_name_input.upper()
+            service_info = service_code_helper.get_service_info(service_name_input)
+            display_name = service_info['service_name'] if service_info else service_name_input
+            
+            # AWS Documentation MCPを試行
+            doc_result = self._get_pricing_from_aws_documentation(service_code, region, instance_type, display_name)
+            
+            if doc_result:
+                return doc_result
+            else:
+                # 最終フォールバック
+                return self._calculate_fallback_cost_estimate(service_code, region, instance_type)
     
     def _convert_mcp_result_to_standard_format(self, mcp_result: Any, service_name: str, instance_type: Optional[str], region: str) -> Optional[Dict[str, Any]]:
         """
@@ -772,39 +826,249 @@ resource "aws_iam_role" "lambda_role" {
         MCP呼び出し失敗時のフォールバック計算
         
         Args:
-            service_name: AWSサービス名
+            service_name: AWSサービス名またはサービスコード
             region: AWSリージョン
             instance_type: インスタンスタイプ
             
         Returns:
             フォールバック計算されたコスト見積もり
         """
-        # 既存の動的計算ロジックを簡略化して使用
+        # サービスコードを正規化（既に正しいサービスコードの場合はそのまま使用）
+        service_code_helper = get_service_code_helper()
+        normalized_service_code = service_code_helper.find_service_code(service_name) or service_name
+        
+        # リージョン別料金倍率（us-east-1を基準）
         region_multiplier = {
-            "us-east-1": 1.0, "us-west-2": 1.05, "eu-west-1": 1.1,
-            "ap-northeast-1": 1.15, "ap-southeast-1": 1.12
+            "us-east-1": 1.0, "us-east-2": 1.02, "us-west-1": 1.08, "us-west-2": 1.05,
+            "eu-west-1": 1.1, "eu-west-2": 1.12, "eu-west-3": 1.15, "eu-central-1": 1.13,
+            "ap-northeast-1": 1.15, "ap-northeast-2": 1.12, "ap-southeast-1": 1.12, 
+            "ap-southeast-2": 1.14, "ap-south-1": 1.08, "ca-central-1": 1.06, "sa-east-1": 1.18
         }.get(region, 1.0)
         
+        # インスタンスタイプ別倍率
         instance_multiplier = {
-            "t3.nano": 0.5, "t3.micro": 0.75, "t3.small": 1.0,
-            "t3.medium": 1.5, "t3.large": 2.0, "t3.xlarge": 3.0
+            # T3 系（バーストable）
+            "t3.nano": 0.3, "t3.micro": 0.5, "t3.small": 1.0, "t3.medium": 1.8,
+            "t3.large": 3.6, "t3.xlarge": 7.2, "t3.2xlarge": 14.4,
+            # T4g 系（ARM）
+            "t4g.nano": 0.25, "t4g.micro": 0.45, "t4g.small": 0.9, "t4g.medium": 1.6,
+            "t4g.large": 3.2, "t4g.xlarge": 6.4, "t4g.2xlarge": 12.8,
+            # M5 系（汎用）
+            "m5.large": 4.0, "m5.xlarge": 8.0, "m5.2xlarge": 16.0, "m5.4xlarge": 32.0,
+            # C5 系（コンピューティング最適化）
+            "c5.large": 3.8, "c5.xlarge": 7.6, "c5.2xlarge": 15.2, "c5.4xlarge": 30.4,
+            # R5 系（メモリ最適化）
+            "r5.large": 5.2, "r5.xlarge": 10.4, "r5.2xlarge": 20.8, "r5.4xlarge": 41.6
         }.get(instance_type, 1.0) if instance_type else 1.0
         
+        # サービス別基本料金（月額USD、us-east-1の標準構成）
         base_costs = {
-            "EC2": 25, "S3": 20, "RDS": 70, "LAMBDA": 12, 
-            "CLOUDFRONT": 18, "VPC": 8
+            "AmazonEC2": 25, "AmazonS3": 8, "AmazonRDS": 85, "AWSLambda": 12,
+            "AmazonCloudFront": 15, "AmazonVPC": 5, "AmazonDynamoDB": 18,
+            "AmazonECS": 30, "AmazonEKS": 75, "AmazonLightsail": 20,
+            "AmazonEFS": 35, "AmazonFSx": 120, "AmazonRedshift": 180,
+            "AmazonElastiCache": 95, "AmazonBedrock": 45, "AmazonSageMaker": 150,
+            "AmazonSNS": 2, "AmazonSQS": 3, "AmazonCloudWatch": 12,
+            "AmazonRoute53": 8, "AWSELB": 25
         }
         
-        base_cost = base_costs.get(service_name, 30)
+        # 正規化されたサービスコードから基本料金を取得
+        base_cost = base_costs.get(normalized_service_code, 30)
+        
+        # 最終料金を計算
         final_cost = base_cost * region_multiplier * instance_multiplier
         
+        # サービス表示名を取得
+        service_info = service_code_helper.get_service_info(service_name)
+        display_name = service_info['service_name'] if service_info else service_name
+        
+        # 最適化提案を生成
+        optimization_suggestions = []
+        
+        # インスタンスタイプ固有の最適化
+        if instance_type and instance_type.startswith('t3.'):
+            optimization_suggestions.append("Reserved Instanceで20-75%の削減可能")
+        elif instance_type and 'xlarge' in instance_type:
+            optimization_suggestions.append("Savings Plansで最大72%の削減可能")
+        
+        # サービス固有の最適化
+        if normalized_service_code == "AmazonEC2":
+            optimization_suggestions.append("Spot Instanceで最大90%の削減可能")
+        elif normalized_service_code == "AmazonS3":
+            optimization_suggestions.append("Intelligent Tieringで自動コスト最適化")
+        elif normalized_service_code == "AmazonRDS":
+            optimization_suggestions.append("Aurora Serverlessで使用量ベース課金")
+        
+        optimization = "; ".join(optimization_suggestions) if optimization_suggestions else "詳細分析が必要"
+        
+        # 削減率を推定
+        reduction_rate = 0.15  # デフォルト
+        if any("Reserved" in s for s in optimization_suggestions):
+            reduction_rate = 0.35
+        elif any("Savings" in s for s in optimization_suggestions):
+            reduction_rate = 0.45
+        elif any("Spot" in s for s in optimization_suggestions):
+            reduction_rate = 0.65
+        
         return {
-            "cost": final_cost,
-            "detail": f"{service_name} {instance_type or '標準'} ({region}) [フォールバック]",
-            "optimization": "詳細分析が必要",
-            "current_state": "デフォルト構成",
-            "reduction_rate": 0.15
+            "cost": round(final_cost, 2),
+            "detail": f"{display_name} {instance_type or '標準構成'} ({region}) [推定値]",
+            "optimization": optimization,
+            "current_state": "オンデマンド料金",
+            "reduction_rate": reduction_rate,
+            "note": "MCPサーバー未利用のため推定値です。正確な料金は AWS料金計算ツールをご利用ください。"
         }
+    
+    def _get_pricing_from_aws_documentation(self, service_code: str, region: str, instance_type: Optional[str], display_name: str) -> Optional[Dict[str, Any]]:
+        """
+        AWS Documentation MCPから価格情報を取得
+        
+        Args:
+            service_code: AWSサービスコード
+            region: AWSリージョン
+            instance_type: インスタンスタイプ
+            display_name: サービス表示名
+            
+        Returns:
+            価格情報、または取得失敗時はNone
+        """
+        try:
+            # AWS Documentation MCPに送信するクエリを構築
+            pricing_query = f"{display_name} pricing"
+            if instance_type:
+                pricing_query += f" {instance_type}"
+            pricing_query += f" {region} cost per hour monthly"
+            
+            self.logger.debug(f"AWS Documentation MCP呼び出し: query={pricing_query}")
+            
+            # AWS Documentation MCPを呼び出し
+            doc_result = self.call_mcp_tool("awslabs.aws-documentation-mcp-server", "search_documentation", query=pricing_query)
+            
+            if doc_result and isinstance(doc_result, dict):
+                # ドキュメント検索結果から価格情報を抽出
+                extracted_cost = self._extract_pricing_from_documentation(doc_result, service_code, instance_type, region, display_name)
+                if extracted_cost:
+                    return extracted_cost
+            
+            # 汎用的な価格クエリも試行
+            if instance_type:
+                generic_query = f"AWS {display_name} {instance_type} pricing cost"
+                doc_result = self.call_mcp_tool("awslabs.aws-documentation-mcp-server", "search_documentation", query=generic_query)
+                
+                if doc_result and isinstance(doc_result, dict):
+                    extracted_cost = self._extract_pricing_from_documentation(doc_result, service_code, instance_type, region, display_name)
+                    if extracted_cost:
+                        return extracted_cost
+            
+            self.logger.debug(f"AWS Documentation MCPから有用な価格情報を取得できませんでした: {service_code}")
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"AWS Documentation MCP呼び出しエラー: {e}")
+            return None
+    
+    def _extract_pricing_from_documentation(self, doc_result: Dict[str, Any], service_code: str, instance_type: Optional[str], region: str, display_name: str) -> Optional[Dict[str, Any]]:
+        """
+        AWS Documentation MCPの結果から価格情報を抽出
+        
+        Args:
+            doc_result: AWS Documentation MCPの検索結果
+            service_code: AWSサービスコード
+            instance_type: インスタンスタイプ
+            region: AWSリージョン
+            display_name: サービス表示名
+            
+        Returns:
+            抽出された価格情報、または抽出失敗時はNone
+        """
+        try:
+            import re
+            
+            # ドキュメント内容を取得
+            content = ""
+            if "content" in doc_result:
+                content = str(doc_result["content"])
+            elif "description" in doc_result:
+                content = str(doc_result["description"])
+            elif "text" in doc_result:
+                content = str(doc_result["text"])
+            else:
+                # 辞書全体を文字列として検索
+                content = str(doc_result)
+            
+            if not content:
+                return None
+            
+            # 価格パターンを検索
+            price_patterns = [
+                # 時間単価（$0.0464 per hour等）
+                r'\$(\d+\.?\d*)\s*(?:per\s+hour|/hour|hourly)',
+                # 月額（$33.55 per month等）
+                r'\$(\d+\.?\d*)\s*(?:per\s+month|/month|monthly)',
+                # GB単価（$0.023 per GB等）
+                r'\$(\d+\.?\d*)\s*(?:per\s+GB|/GB)',
+                # 一般的な価格（$XX.XX）
+                r'\$(\d+\.?\d*)',
+            ]
+            
+            extracted_prices = []
+            for pattern in price_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                for match in matches:
+                    try:
+                        price = float(match)
+                        if 0.001 <= price <= 10000:  # 現実的な価格範囲
+                            extracted_prices.append(price)
+                    except ValueError:
+                        continue
+            
+            if not extracted_prices:
+                return None
+            
+            # 最も妥当な価格を選択（中央値を使用）
+            extracted_prices.sort()
+            if len(extracted_prices) == 1:
+                hourly_price = extracted_prices[0]
+            else:
+                # 中央値を取得
+                mid = len(extracted_prices) // 2
+                hourly_price = extracted_prices[mid]
+            
+            # 時間単価から月額を計算（730時間/月で計算）
+            monthly_cost = hourly_price * 730
+            
+            # 価格が異常に高い場合は調整
+            if monthly_cost > 5000:
+                monthly_cost = hourly_price  # 既に月額の可能性
+            
+            # 最適化提案を生成
+            optimization_suggestions = []
+            
+            if service_code == "AmazonEC2":
+                optimization_suggestions.append("Reserved Instanceで最大75%削減")
+                optimization_suggestions.append("Spot Instanceで最大90%削減")
+            elif service_code == "AmazonRDS":
+                optimization_suggestions.append("Reserved Instanceで最大69%削減")
+            elif service_code == "AmazonS3":
+                optimization_suggestions.append("Intelligent Tieringで自動最適化")
+            else:
+                optimization_suggestions.append("Reserved pricing optionsで削減可能")
+            
+            optimization = "; ".join(optimization_suggestions)
+            
+            return {
+                "cost": round(monthly_cost, 2),
+                "detail": f"{display_name} {instance_type or '標準構成'} ({region}) [AWS Docs]",
+                "optimization": optimization,
+                "current_state": "オンデマンド料金",
+                "reduction_rate": 0.35,  # AWS Documentation情報に基づく削減率
+                "source": "AWS Documentation MCP",
+                "note": f"AWS公式ドキュメントから抽出した価格情報です（時間単価: ${hourly_price:.4f}）"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Documentation価格抽出エラー: {e}")
+            return None
     
     
     def analyze_cost_with_natural_language(self, query: str) -> Optional[str]:
