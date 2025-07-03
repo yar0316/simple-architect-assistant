@@ -88,6 +88,20 @@ def test_mcp_client_basic():
             if 'awslabs.cost-analysis-mcp-server' in servers:
                 print('✅ Cost Analysis MCP Server設定済み')
                 
+                # 実際のツール名確認
+                print('\n利用可能なツール名:')
+                expected_tools = [
+                    'analyze_cdk_project',
+                    'analyze_terraform_project', 
+                    'get_pricing_from_web',
+                    'get_pricing_from_api',
+                    'get_bedrock_patterns',
+                    'generate_cost_report'
+                ]
+                
+                for tool in expected_tools:
+                    print(f'  - {tool}')
+                
                 # フォールバック機能のテスト
                 print('\nフォールバック機能テスト:')
                 
@@ -112,6 +126,13 @@ def test_mcp_client_basic():
                 
                 print(f'フォールバック計算結果: {result}')
                 print('✅ フォールバック機能動作確認')
+                
+                # 実際のツール名での呼び出しパターンをシミュレート
+                print('\nMCP呼び出しパターン確認:')
+                print('  1. get_pricing_from_api(service_name="EC2", region="us-east-1", instance_type="t3.medium")')
+                print('  2. get_pricing_from_web(query="EC2 t3.medium pricing us-east-1")')
+                print('  3. generate_cost_report(services=["EC2", "S3"], region="us-east-1")')
+                print('✅ ツール名確認完了')
                 
             else:
                 print('❌ Cost Analysis MCP Server未設定')

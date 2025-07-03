@@ -610,8 +610,22 @@ resource "aws_iam_role" "lambda_role" {
             if service_config.get("usage_details"):
                 query += f" with usage: {service_config['usage_details']}"
             
-            # 実際のMCPサーバー呼び出し
-            mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cost", query=query)
+            # 実際のMCPサーバー呼び出し（まずAPIから、失敗時はWebから）
+            mcp_result = None
+            
+            # 最初にAPI経由で価格情報を取得
+            try:
+                mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_api", 
+                                              service_name=service_name, region=region, instance_type=instance_type)
+            except Exception as api_error:
+                self.logger.warning(f"API価格取得失敗、Web検索にフォールバック: {api_error}")
+                
+                # API失敗時はWeb検索にフォールバック
+                try:
+                    mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_web", query=query)
+                except Exception as web_error:
+                    self.logger.error(f"Web価格取得も失敗: {web_error}")
+                    mcp_result = None
             
             if mcp_result and isinstance(mcp_result, dict):
                 # MCPサーバーの結果を既存の形式に変換
@@ -805,8 +819,8 @@ resource "aws_iam_role" "lambda_role" {
             return cached_result
         
         try:
-            # Cost Analysis MCP Serverの自然言語クエリ機能を呼び出し
-            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cost", query=query)
+            # Cost Analysis MCP ServerのWeb検索機能を呼び出し（自然言語クエリに最適）
+            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_web", query=query)
             
             if result:
                 # 結果をキャッシュに保存（長期間有効）
@@ -839,9 +853,9 @@ resource "aws_iam_role" "lambda_role" {
         try:
             # Cost Analysis MCP ServerのIaCプロジェクト分析機能を呼び出し
             if project_type.lower() == "terraform":
-                result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_terraform", project_path=project_path)
+                result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_terraform_project", project_path=project_path)
             elif project_type.lower() == "cdk":
-                result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cdk", project_path=project_path)
+                result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cdk_project", project_path=project_path)
             else:
                 self.logger.error(f"サポートされていないプロジェクトタイプ: {project_type}")
                 return None
@@ -879,7 +893,7 @@ resource "aws_iam_role" "lambda_role" {
             query = f"Generate comprehensive cost report for AWS services: {', '.join(services)} in {region} region with optimization recommendations"
             
             # Cost Analysis MCP Serverの包括的レポート生成機能を呼び出し
-            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "generate_report", 
+            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "generate_cost_report", 
                                       services=services, region=region, query=query)
             
             if result:
@@ -910,10 +924,9 @@ resource "aws_iam_role" "lambda_role" {
             return cached_result
         
         try:
-            # Cost Analysis MCP Serverの最適化推奨機能を呼び出し
+            # Cost Analysis MCP Serverの価格情報取得機能を使用して最適化推奨を取得
             query = f"Provide cost optimization recommendations for current AWS setup: {current_setup}"
-            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "optimize_cost", 
-                                      current_setup=current_setup, query=query)
+            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_web", query=query)
             
             if result:
                 # 結果をリスト形式に変換
