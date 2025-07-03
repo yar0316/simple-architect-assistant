@@ -305,15 +305,29 @@ class MCPClientService:
                 # 設定を保存（後で実際の接続時に使用）
                 self.mcp_tools[server_name] = {
                     "config": server_config,
-                    "initialized": True,
-                    "fallback_mode": False
+                    "initialized": False,  # 実際の接続確認後にTrue
+                    "fallback_mode": False,
+                    "connection_status": "configured",  # configured, connecting, connected, failed
+                    "last_connection_attempt": None,
+                    "connection_error": None,
+                    "available_tools": []
                 }
             
             if server_configs:
-                # MultiServerMCPClientを初期化（実際の接続は後で行う）
+                # MultiServerMCPClientを初期化
                 self.mcp_client = MultiServerMCPClient(server_configs)
                 self.logger.info(f"{len(server_configs)} のMCPサーバー設定が準備されました")
-                return True
+                
+                # 非同期で接続確認を実行
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    success_count = loop.run_until_complete(self._verify_mcp_connections())
+                    self.logger.info(f"MCP接続確認完了: {success_count}/{len(server_configs)} サーバーが利用可能")
+                    return success_count > 0
+                finally:
+                    loop.close()
             else:
                 self.logger.warning("有効なMCPサーバー設定が見つかりませんでした")
                 return False
@@ -322,6 +336,62 @@ class MCPClientService:
             self.logger.error(f"MCPサーバー初期化エラー: {e}")
             return False
     
+    async def _verify_mcp_connections(self) -> int:
+        """MCPサーバーへの接続を確認し、状態を更新"""
+        success_count = 0
+        
+        for server_name in self.mcp_tools.keys():
+            try:
+                self.logger.info(f"🔍 MCP接続確認開始: {server_name}")
+                self.mcp_tools[server_name]["connection_status"] = "connecting"
+                self.mcp_tools[server_name]["last_connection_attempt"] = datetime.now()
+                
+                # タイムアウト付きでツール一覧を取得
+                tools = await asyncio.wait_for(
+                    self.mcp_client.get_tools(), 
+                    timeout=10.0
+                )
+                
+                if tools:
+                    # サーバー固有のツールを抽出
+                    server_tools = []
+                    for tool in tools:
+                        tool_info = f"{getattr(tool, 'name', 'unknown')}"
+                        if hasattr(tool, 'server_name') and tool.server_name == server_name:
+                            server_tools.append(tool_info)
+                        elif not hasattr(tool, 'server_name'):
+                            # サーバー名情報がない場合は候補として記録
+                            server_tools.append(f"{tool_info}?")
+                    
+                    self.mcp_tools[server_name]["available_tools"] = server_tools
+                    self.mcp_tools[server_name]["connection_status"] = "connected"
+                    self.mcp_tools[server_name]["initialized"] = True
+                    self.mcp_tools[server_name]["connection_error"] = None
+                    
+                    self.logger.info(f"✅ MCP接続成功: {server_name} -> {len(server_tools)}個のツール")
+                    success_count += 1
+                    
+                else:
+                    self.logger.warning(f"⚠️  MCP接続はできたがツールが見つからない: {server_name}")
+                    self.mcp_tools[server_name]["connection_status"] = "connected_no_tools"
+                    self.mcp_tools[server_name]["initialized"] = False
+                    
+            except asyncio.TimeoutError:
+                error_msg = f"接続タイムアウト（10秒）: {server_name}"
+                self.logger.warning(f"⏰ {error_msg}")
+                self.mcp_tools[server_name]["connection_status"] = "timeout"
+                self.mcp_tools[server_name]["connection_error"] = error_msg
+                self.mcp_tools[server_name]["initialized"] = False
+                
+            except Exception as e:
+                error_msg = f"接続エラー: {str(e)}"
+                self.logger.error(f"❌ MCP接続失敗: {server_name} -> {error_msg}")
+                self.mcp_tools[server_name]["connection_status"] = "failed"
+                self.mcp_tools[server_name]["connection_error"] = error_msg
+                self.mcp_tools[server_name]["initialized"] = False
+        
+        return success_count
+    
     def get_available_tools(self) -> List[str]:
         """利用可能なMCPツールのリストを取得"""
         tools = []
@@ -329,6 +399,20 @@ class MCPClientService:
             if server_info.get("initialized", False):
                 tools.append(server_name)
         return tools
+    
+    def get_mcp_server_status(self) -> Dict[str, Dict[str, Any]]:
+        """MCPサーバーの詳細状態を取得"""
+        status = {}
+        for server_name, server_info in self.mcp_tools.items():
+            status[server_name] = {
+                "connection_status": server_info.get("connection_status", "unknown"),
+                "initialized": server_info.get("initialized", False),
+                "fallback_mode": server_info.get("fallback_mode", False),
+                "available_tools": server_info.get("available_tools", []),
+                "last_connection_attempt": server_info.get("last_connection_attempt"),
+                "connection_error": server_info.get("connection_error")
+            }
+        return status
     
     async def call_mcp_tool_async(self, server_name: str, tool_name: str, **kwargs) -> Optional[Dict[str, Any]]:
         """
@@ -342,35 +426,95 @@ class MCPClientService:
         Returns:
             ツールの実行結果、またはエラー時はNone
         """
+        self.logger.info(f"🔄 MCPツール呼び出し開始: サーバー='{server_name}', ツール='{tool_name}'")
+        self.logger.debug(f"   - パラメータ: {kwargs}")
+        
+        # MCPクライアントの初期化状態確認
         if not self.mcp_client:
-            self.logger.error("MCPクライアントが初期化されていません")
+            self.logger.error(f"❌ MCPクライアントが初期化されていません（サーバー: {server_name}）")
             return None
-            
+        
+        # フォールバックモードの場合は静的結果を返す
+        if server_name in self.mcp_tools and self.mcp_tools[server_name].get("fallback_mode", False):
+            self.logger.info(f"🔄 フォールバックモード: {server_name}.{tool_name}")
+            return self._handle_fallback_tool_call(server_name, tool_name, **kwargs)
+        
+        # サーバー設定の確認
         if server_name not in self.mcp_tools:
-            self.logger.error(f"未知のMCPサーバー: {server_name}")
+            self.logger.warning(f"⚠️  未知のMCPサーバー: {server_name}")
+            self.logger.info(f"   - 利用可能サーバー: {list(self.mcp_tools.keys())}")
             return None
             
         try:
             # MCPクライアントからツールを取得
+            self.logger.debug(f"🔍 MCPクライアントからツール一覧取得中...")
             tools = await self.mcp_client.get_tools()
+            self.logger.info(f"   - 取得されたツール数: {len(tools)}")
             
-            # 指定されたサーバーのツールを検索
+            # デバッグ用：利用可能なツール一覧を表示
+            available_tools = []
+            for tool in tools:
+                tool_info = f"{getattr(tool, 'name', 'NO_NAME')}"
+                if hasattr(tool, 'server_name'):
+                    tool_info += f"@{tool.server_name}"
+                available_tools.append(tool_info)
+            
+            self.logger.debug(f"   - 利用可能ツール: {available_tools}")
+            
+            # サーバー固有のツールを検索
             target_tool = None
+            matching_tools = []
+            
             for tool in tools:
                 if hasattr(tool, 'name') and tool.name == tool_name:
-                    target_tool = tool
-                    break
+                    matching_tools.append(tool)
+                    
+                    # サーバー名が一致するツールを優先
+                    if hasattr(tool, 'server_name') and tool.server_name == server_name:
+                        target_tool = tool
+                        self.logger.info(f"✅ サーバー固有ツール発見: {server_name}.{tool_name}")
+                        break
+                    # サーバー名情報がない場合は、とりあえず候補として保持
+                    elif not target_tool:
+                        target_tool = tool
             
             if not target_tool:
-                self.logger.error(f"ツールが見つかりません: {tool_name}")
+                self.logger.error(f"❌ ツールが見つかりません: {tool_name}")
+                self.logger.info(f"   - 一致するツール: {len(matching_tools)}個")
+                if matching_tools:
+                    for i, tool in enumerate(matching_tools):
+                        server_info = getattr(tool, 'server_name', 'unknown_server')
+                        self.logger.info(f"     {i+1}. {tool.name}@{server_info}")
                 return None
             
+            # ツールが見つからない場合でも、フォールバック処理を試行
+            if not target_tool and tool_name in ["get_pricing_from_api", "get_pricing_from_web"]:
+                self.logger.info(f"🔄 Cost Analysis MCP未利用、フォールバック処理を実行")
+                return self._handle_fallback_tool_call(server_name, tool_name, **kwargs)
+            
             # ツールを実行
+            self.logger.info(f"🚀 MCPツール実行: {tool_name}")
             result = await target_tool.ainvoke(kwargs)
+            
+            if result:
+                self.logger.info(f"✅ MCPツール実行成功: {tool_name}")
+                self.logger.debug(f"   - 結果タイプ: {type(result)}")
+                self.logger.debug(f"   - 結果サイズ: {len(str(result))} 文字")
+            else:
+                self.logger.warning(f"❌ MCPツール実行結果が空: {tool_name}")
+            
             return result
             
         except Exception as e:
-            self.logger.error(f"MCPツール呼び出しエラー: {e}")
+            self.logger.error(f"❌ MCPツール呼び出し例外: {tool_name} -> {e}")
+            import traceback
+            self.logger.debug(f"   - 詳細トレースバック: {traceback.format_exc()}")
+            
+            # 例外が発生した場合もフォールバックを試行
+            if tool_name in ["get_pricing_from_api", "get_pricing_from_web"]:
+                self.logger.info(f"🔄 例外後フォールバック処理実行: {tool_name}")
+                return self._handle_fallback_tool_call(server_name, tool_name, **kwargs)
+            
             return None
     
     def call_mcp_tool(self, server_name: str, tool_name: str, **kwargs) -> Optional[Dict[str, Any]]:
@@ -620,63 +764,32 @@ resource "aws_iam_role" "lambda_role" {
             region = service_config.get("region", "us-east-1")
             instance_type = service_config.get("instance_type")
             
-            # デバッグ：サービスコードヘルパーの状況を確認
-            self.logger.error(f"🚨 [DEBUG] サービス名入力: '{service_name_input}'")
-            print(f"🚨 [DEBUG] サービス名入力: '{service_name_input}'")
-            
             # サービスコードヘルパーからサービスコードを取得
+            self.logger.info(f"💼 サービス名入力: '{service_name_input}'")
+            
             try:
                 service_code_helper = get_service_code_helper()
-                self.logger.error(f"🚨 [DEBUG] サービスコードヘルパー取得成功: {type(service_code_helper)}")
-                print(f"🚨 [DEBUG] サービスコードヘルパー取得成功: {type(service_code_helper)}")
-                
-                # ヘルパーインスタンスの詳細状態を確認
-                self.logger.error(f"🚨 [DEBUG] ヘルパーインスタンスID: {id(service_code_helper)}")
-                print(f"🚨 [DEBUG] ヘルパーインスタンスID: {id(service_code_helper)}")
-                
-                # service_codesの状態を直接確認
-                self.logger.error(f"🚨 [DEBUG] service_codes属性: {hasattr(service_code_helper, 'service_codes')}")
-                print(f"🚨 [DEBUG] service_codes属性: {hasattr(service_code_helper, 'service_codes')}")
-                
-                if hasattr(service_code_helper, 'service_codes'):
-                    self.logger.error(f"🚨 [DEBUG] service_codes値: {service_code_helper.service_codes}")
-                    print(f"🚨 [DEBUG] service_codes値: {service_code_helper.service_codes}")
+                self.logger.debug(f"サービスコードヘルパー取得成功: {type(service_code_helper)}")
                 
             except Exception as helper_error:
-                self.logger.error(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
-                print(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
+                self.logger.error(f"サービスコードヘルパー取得失敗: {helper_error}")
                 return self._calculate_fallback_cost_estimate(service_name_input.upper(), region, instance_type)
             
-            # AWSServiceCodeHelperの内部状況をデバッグ
-            self.logger.error(f"🚨 [DEBUG] サービスコード辞書の状況: {bool(service_code_helper.service_codes)}")
-            print(f"🚨 [DEBUG] サービスコード辞書の状況: {bool(service_code_helper.service_codes)}")
+            # AWSServiceCodeHelperの状況確認
+            self.logger.debug(f"サービスコード辞書の状況: {bool(service_code_helper.service_codes)}")
             
             if service_code_helper.service_codes:
-                self.logger.error(f"🚨 [DEBUG] 辞書サイズ: {len(service_code_helper.service_codes)}")
-                print(f"🚨 [DEBUG] 辞書サイズ: {len(service_code_helper.service_codes)}")
-                # 最初の5つのキーを表示
-                sample_keys = list(service_code_helper.service_codes.keys())[:5]
-                self.logger.error(f"🚨 [DEBUG] サンプルキー: {sample_keys}")
-                print(f"🚨 [DEBUG] サンプルキー: {sample_keys}")
+                self.logger.debug(f"辞書サイズ: {len(service_code_helper.service_codes)}")
             else:
-                self.logger.error(f"🚨 [DEBUG] サービスコード辞書が空または未初期化")
-                print(f"🚨 [DEBUG] サービスコード辞書が空または未初期化")
+                self.logger.warning("サービスコード辞書が空または未初期化")
             
-            # find_service_codeメソッド直接呼び出し
-            self.logger.error(f"🚨 [DEBUG] find_service_code呼び出し直前: '{service_name_input}'")
-            print(f"🚨 [DEBUG] find_service_code呼び出し直前: '{service_name_input}'")
-            
+            # find_service_codeメソッド呼び出し
             try:
                 service_code = service_code_helper.find_service_code(service_name_input)
-                self.logger.error(f"🚨 [DEBUG] find_service_code呼び出し成功")
-                print(f"🚨 [DEBUG] find_service_code呼び出し成功")
+                self.logger.info(f"✅ サービス名変換: '{service_name_input}' → '{service_code}'")
             except Exception as find_error:
-                self.logger.error(f"🚨 [DEBUG] find_service_code呼び出し例外: {find_error}")
-                print(f"🚨 [DEBUG] find_service_code呼び出し例外: {find_error}")
+                self.logger.error(f"find_service_code呼び出し例外: {find_error}")
                 service_code = None
-            
-            self.logger.error(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")
-            print(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")
             
             if not service_code:
                 # サービスコードが見つからない場合、候補を提案
@@ -840,32 +953,66 @@ resource "aws_iam_role" "lambda_role" {
                 if instance_type:
                     detail += f" {instance_type}"
                 detail += f" ({region})"
+                source_info = ""
+                
+                # フォールバック結果の場合の特別処理
+                if mcp_result.get("source") == "fallback_calculation":
+                    self.logger.info(f"🔄 フォールバック結果を標準形式に変換")
+                    pricing_info = mcp_result.get("pricing", {})
+                    monthly_cost = pricing_info.get("monthly_estimate", 0)
+                    detail += f" [フォールバック推定値]"
+                    source_info = " (フォールバック)"
                     
-                # MCPサーバーから価格情報を抽出（一般的なフィールド名で試行）
-                if "cost" in mcp_result:
-                    monthly_cost = float(mcp_result["cost"])
-                elif "price" in mcp_result:
-                    monthly_cost = float(mcp_result["price"])
-                elif "monthly_cost" in mcp_result:
-                    monthly_cost = float(mcp_result["monthly_cost"])
+                elif mcp_result.get("source") == "fallback_analysis":
+                    self.logger.info(f"🔄 フォールバック分析結果を標準形式に変換")
+                    # Web検索フォールバックの場合は基本コストを推定
+                    monthly_cost = 75  # デフォルト値
+                    detail += f" [フォールバック分析]"
+                    source_info = " (フォールバック分析)"
+                    
                 else:
-                    # 数値を含む文字列から価格を抽出
-                    import re
-                    text = str(mcp_result)
-                    price_matches = re.findall(r'\$?(\d+\.?\d*)', text)
-                    if price_matches:
-                        monthly_cost = float(price_matches[0])
+                    # 通常のMCPサーバー結果の処理
+                    # MCPサーバーから価格情報を抽出（一般的なフィールド名で試行）
+                    if "cost" in mcp_result:
+                        monthly_cost = float(mcp_result["cost"])
+                    elif "price" in mcp_result:
+                        monthly_cost = float(mcp_result["price"])
+                    elif "monthly_cost" in mcp_result:
+                        monthly_cost = float(mcp_result["monthly_cost"])
+                    elif "pricing" in mcp_result and isinstance(mcp_result["pricing"], dict):
+                        pricing = mcp_result["pricing"]
+                        monthly_cost = pricing.get("monthly_estimate", pricing.get("monthly", 0))
+                    else:
+                        # 数値を含む文字列から価格を抽出
+                        import re
+                        text = str(mcp_result)
+                        price_matches = re.findall(r'\$?(\d+\.?\d*)', text)
+                        if price_matches:
+                            monthly_cost = float(price_matches[0])
                 
                 # 最適化提案を抽出
-                optimization = mcp_result.get("optimization", "Reserved Instance検討")
-                if "recommendation" in mcp_result:
+                optimization = "Reserved Instance検討"
+                if mcp_result.get("source") == "fallback_analysis":
+                    recommendations = mcp_result.get("recommendations", [])
+                    if recommendations:
+                        optimization = "; ".join(recommendations[:2])  # 最初の2つを結合
+                elif "optimization" in mcp_result:
+                    optimization = mcp_result["optimization"]
+                elif "recommendation" in mcp_result:
                     optimization = mcp_result["recommendation"]
+                elif "recommendations" in mcp_result and isinstance(mcp_result["recommendations"], list):
+                    optimization = "; ".join(mcp_result["recommendations"][:2])
+                
+                # 注記情報を追加
+                note_info = mcp_result.get("note", "")
+                if note_info:
+                    optimization += f" {source_info}"
                 
                 return {
                     "cost": monthly_cost,
                     "detail": detail,
                     "optimization": optimization,
-                    "current_state": "オンデマンド",
+                    "current_state": "オンデマンド" + source_info,
                     "reduction_rate": 0.25  # デフォルト削減率
                 }
             
@@ -1416,6 +1563,184 @@ resource "aws_iam_role" "lambda_role" {
     def cleanup_expired_cache(self) -> int:
         """期限切れキャッシュを削除"""
         return self.request_cache.cleanup_expired()
+    
+    def _handle_fallback_tool_call(self, server_name: str, tool_name: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        MCPサーバーが利用できない場合のフォールバック処理
+        
+        Args:
+            server_name: MCPサーバー名
+            tool_name: ツール名
+            **kwargs: ツールパラメータ
+            
+        Returns:
+            フォールバック結果またはNone
+        """
+        self.logger.info(f"🔄 フォールバック処理実行: {server_name}.{tool_name}")
+        
+        try:
+            if server_name == "awslabs.cost-analysis-mcp-server":
+                if tool_name == "get_pricing_from_api":
+                    return self._fallback_cost_analysis_api(**kwargs)
+                elif tool_name == "get_pricing_from_web":
+                    return self._fallback_cost_analysis_web(**kwargs)
+                elif tool_name == "generate_cost_report":
+                    return self._fallback_generate_cost_report(**kwargs)
+                
+            elif server_name == "awslabs.aws-documentation-mcp-server":
+                if tool_name == "search_documentation":
+                    return self._fallback_aws_documentation(**kwargs)
+                    
+            elif server_name == "awslabs.terraform-mcp-server":
+                if tool_name == "generate_terraform":
+                    return self._fallback_terraform_generation(**kwargs)
+                    
+            self.logger.warning(f"⚠️  未対応のフォールバック: {server_name}.{tool_name}")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"❌ フォールバック処理エラー: {e}")
+            return None
+    
+    def _fallback_cost_analysis_api(self, service_code: str, region: str, **kwargs) -> Dict[str, Any]:
+        """Cost Analysis API フォールバック"""
+        self.logger.info(f"💰 Cost Analysis APIフォールバック: {service_code} ({region})")
+        
+        # 基本的なコスト情報を返す（実際のAPIデータの代替）
+        base_costs = {
+            "AmazonEC2": {"hourly": 0.0464, "monthly": 33.5},
+            "AmazonS3": {"gb_month": 0.023, "monthly": 15.0},
+            "AmazonRDS": {"hourly": 0.115, "monthly": 83.0},
+            "AWSLambda": {"million_requests": 0.20, "monthly": 12.0},
+            "AmazonDynamoDB": {"wcu_month": 0.00065, "monthly": 25.0}
+        }
+        
+        cost_info = base_costs.get(service_code, {"hourly": 0.05, "monthly": 36.0})
+        
+        return {
+            "service_code": service_code,
+            "region": region,
+            "pricing": {
+                "monthly_estimate": cost_info["monthly"],
+                "currency": "USD",
+                "pricing_model": "On-Demand"
+            },
+            "note": "フォールバック値（実際のAPIデータではありません）",
+            "source": "fallback_calculation"
+        }
+    
+    def _fallback_cost_analysis_web(self, query: str, **kwargs) -> Dict[str, Any]:
+        """Cost Analysis Web検索 フォールバック"""
+        self.logger.info(f"🌐 Cost Analysis Web検索フォールバック: {query}")
+        
+        # 基本的なコスト分析結果を返す
+        return {
+            "query": query,
+            "analysis": f"'{query}' に関するコスト分析：基本構成での月額は約$50-200の範囲と推定されます。正確な料金は使用量、リージョン、インスタンスタイプによって大きく変動します。AWS料金計算ツールでの詳細見積もりをお勧めします。",
+            "recommendations": [
+                "Reserved Instancesで20-75%の節約が可能",
+                "Savings Plansによる柔軟な割引適用",
+                "適切なインスタンスサイズの選択"
+            ],
+            "note": "フォールバック情報（実際のWeb検索結果ではありません）",
+            "source": "fallback_analysis"
+        }
+    
+    def _fallback_generate_cost_report(self, services: List[str], region: str, **kwargs) -> Dict[str, Any]:
+        """コストレポート生成 フォールバック"""
+        self.logger.info(f"📊 コストレポート生成フォールバック: {services} ({region})")
+        
+        total_cost = 0
+        service_costs = {}
+        
+        for service in services:
+            # 簡単なコスト推定
+            if "EC2" in service.upper():
+                cost = 85
+            elif "S3" in service.upper():
+                cost = 20
+            elif "RDS" in service.upper():
+                cost = 150
+            elif "LAMBDA" in service.upper():
+                cost = 25
+            else:
+                cost = 50
+                
+            service_costs[service] = cost
+            total_cost += cost
+        
+        return {
+            "services": services,
+            "region": region,
+            "total_monthly_cost": total_cost,
+            "service_breakdown": service_costs,
+            "currency": "USD",
+            "report_summary": f"総月額コスト: ${total_cost} USD ({region})",
+            "note": "フォールバック推定値",
+            "source": "fallback_report"
+        }
+    
+    def _fallback_aws_documentation(self, query: str, **kwargs) -> Dict[str, Any]:
+        """AWS Documentation フォールバック"""
+        self.logger.info(f"📚 AWS Documentation フォールバック: {query}")
+        
+        common_docs = {
+            "ec2": "Amazon EC2は、AWS クラウドでスケーラブルなコンピューティング容量を提供します。",
+            "s3": "Amazon S3は、業界をリードするスケーラビリティ、データ可用性、セキュリティ、パフォーマンスを提供するオブジェクトストレージサービスです。",
+            "rds": "Amazon RDSでは、クラウドでリレーショナルデータベースを簡単にセットアップ、運用、スケールできます。",
+            "lambda": "AWS Lambdaは、サーバーをプロビジョニングまたは管理することなく、コードを実行できるコンピューティングサービスです。"
+        }
+        
+        description = "AWS公式ドキュメントを参照してください。"
+        for key, desc in common_docs.items():
+            if key in query.lower():
+                description = desc
+                break
+        
+        return {
+            "query": query,
+            "description": description,
+            "source": "fallback_documentation",
+            "note": "フォールバック情報"
+        }
+    
+    def _fallback_terraform_generation(self, requirements: str, **kwargs) -> Dict[str, Any]:
+        """Terraform生成 フォールバック"""
+        self.logger.info(f"🏗️ Terraform生成フォールバック: {requirements}")
+        
+        # 基本的なTerraformテンプレートを返す
+        if "vpc" in requirements.lower():
+            code = '''
+# VPC基本構成
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  
+  tags = {
+    Name = "main-vpc"
+  }
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name = "public-subnet"
+  }
+}
+'''
+        else:
+            code = "# 詳細な要件を指定してください。"
+        
+        return {
+            "requirements": requirements,
+            "terraform_code": code,
+            "note": "フォールバックテンプレート",
+            "source": "fallback_terraform"
+        }
 
 
 # Streamlit用のセッション管理

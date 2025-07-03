@@ -219,17 +219,35 @@ class LangChainMCPManager:
             def cost_analysis(service_requirements: str) -> str:
                 """AWS構成のコスト分析を実行"""
                 try:
-                    # この関数が呼び出されているかを確認するためのERRORレベルログ
-                    logging.error(f"🚨 [DEBUG] cost_analysis関数が呼び出されました: {service_requirements}")
-                    print(f"🚨 [DEBUG] cost_analysis関数が呼び出されました: {service_requirements}")  # print文も追加
+                    logging.info(f"🔍 エージェントツール: コスト分析開始 - 要件: {service_requirements}")
+                    
+                    # 分析実行状況の詳細追跡
+                    analysis_steps = {
+                        "core_guidance": False,
+                        "aws_docs": False,
+                        "service_detection": False,
+                        "cost_estimates": {},
+                        "report_generation": False
+                    }
                     # Core MCPからコスト関連ガイダンスを取得
-                    cost_guidance = mcp_client_service.get_core_mcp_guidance(f"コスト最適化 {service_requirements}")
+                    try:
+                        cost_guidance = mcp_client_service.get_core_mcp_guidance(f"コスト最適化 {service_requirements}")
+                        analysis_steps["core_guidance"] = True
+                        logging.info(f"✅ Core MCP ガイダンス取得完了")
+                    except Exception as e:
+                        cost_guidance = None
+                        logging.warning(f"⚠️ Core MCP ガイダンス取得失敗: {e}")
                     
                     # AWS Documentationからコスト情報を検索
-                    cost_docs = mcp_client_service.get_aws_documentation(f"pricing cost calculator {service_requirements}")
+                    try:
+                        cost_docs = mcp_client_service.get_aws_documentation(f"pricing cost calculator {service_requirements}")
+                        analysis_steps["aws_docs"] = True
+                        logging.info(f"✅ AWS Documentation 取得完了")
+                    except Exception as e:
+                        cost_docs = None
+                        logging.warning(f"⚠️ AWS Documentation 取得失敗: {e}")
                     
                     # 要件からAWSサービスを抽出してコスト概算表を作成
-                    aws_services = []
                     service_patterns = {
                         "EC2": r"(?i)ec2|インスタンス|仮想マシン|サーバー",
                         "S3": r"(?i)s3|ストレージ|オブジェクト",
@@ -239,6 +257,7 @@ class LangChainMCPManager:
                         "VPC": r"(?i)vpc|ネットワーク|プライベート"
                     }
                     
+                    aws_services = []
                     for service, pattern in service_patterns.items():
                         if re.search(pattern, service_requirements):
                             aws_services.append(service)
@@ -247,10 +266,16 @@ class LangChainMCPManager:
                     if not aws_services:
                         aws_services = ["EC2", "S3", "VPC"]
                     
+                    analysis_steps["service_detection"] = True
+                    logging.info(f"✅ AWSサービス検出完了: {aws_services}")
+                    
                     # MCPサーバーから動的にコスト見積もりを取得
                     cost_estimates = {}
                     
                     # 各サービスについてMCPクライアントから見積もりを取得
+                    successful_estimates = 0
+                    failed_estimates = 0
+                    
                     for service in aws_services:
                         try:
                             logging.info(f"🔄 エージェントツール: {service}のコスト分析開始")
@@ -276,8 +301,12 @@ class LangChainMCPManager:
                             estimate = mcp_client_service.get_cost_estimation(service_config)
                             
                             if estimate:
-                                logging.info(f"✅ MCPクライアント成功: {service} -> {estimate.get('cost', 'N/A')}USD/月")
+                                cost = estimate.get('cost', 'N/A')
+                                source = estimate.get('current_state', 'unknown')
+                                logging.info(f"✅ MCPクライアント成功: {service} -> ${cost}/月 ({source})")
                                 cost_estimates[service] = estimate
+                                analysis_steps["cost_estimates"][service] = "success"
+                                successful_estimates += 1
                             else:
                                 logging.warning(f"❌ MCPクライアント失敗: {service} -> フォールバック使用")
                                 # フォールバック: 基本的な見積もり
@@ -288,6 +317,8 @@ class LangChainMCPManager:
                                     "current_state": "デフォルト",
                                     "reduction_rate": 0.15
                                 }
+                                analysis_steps["cost_estimates"][service] = "fallback"
+                                failed_estimates += 1
                                 
                         except Exception as service_error:
                             logging.error(f"🚨 エージェントツール例外: {service} -> {service_error}")
@@ -299,9 +330,31 @@ class LangChainMCPManager:
                                 "current_state": "不明",
                                 "reduction_rate": 0.10
                             }
+                            analysis_steps["cost_estimates"][service] = "error"
+                            failed_estimates += 1
+                    
+                    # コスト見積もりの統計ログ
+                    logging.info(f"📊 コスト見積もり完了: 成功={successful_estimates}, 失敗={failed_estimates}, 総数={len(aws_services)}")
                     
                     # テンプレートベースでレポートを生成
-                    result = generate_cost_analysis_report(aws_services, cost_estimates, cost_guidance, cost_docs)
+                    try:
+                        result = generate_cost_analysis_report(aws_services, cost_estimates, cost_guidance, cost_docs)
+                        analysis_steps["report_generation"] = True
+                        logging.info(f"✅ コスト分析レポート生成完了")
+                    except Exception as report_error:
+                        logging.error(f"❌ レポート生成エラー: {report_error}")
+                        result = "コスト分析レポートの生成に失敗しました。"
+                    
+                    # 分析実行統計の最終ログ
+                    completed_steps = sum(1 for step, status in analysis_steps.items() 
+                                        if step != "cost_estimates" and status)
+                    successful_services = sum(1 for status in analysis_steps["cost_estimates"].values() 
+                                            if status == "success")
+                    
+                    logging.info(f"🎯 コスト分析完了統計:")
+                    logging.info(f"   - 完了ステップ: {completed_steps}/4")
+                    logging.info(f"   - 成功したサービス: {successful_services}/{len(aws_services)}")
+                    logging.info(f"   - 最終レポート: {'生成成功' if result and not result.startswith('コスト分析レポートの生成に失敗') else '生成失敗'}")
                     
                     # 結果のエラーハンドリング
                     if not result:
@@ -309,6 +362,7 @@ class LangChainMCPManager:
                     
                     return result
                 except Exception as e:
+                    logging.error(f"🚨 コスト分析ツール全体エラー: {e}")
                     return f"コスト分析エラー: {str(e)}。基本的なコスト最適化手法を検討してください。"
             
             # Terraformコード生成ツール（terraform_generatorページ特化）
