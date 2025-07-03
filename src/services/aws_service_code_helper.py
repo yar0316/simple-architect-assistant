@@ -55,15 +55,52 @@ class AWSServiceCodeHelper:
             data = response.json()
             self.service_codes = {}
             
+            # レスポンス構造をデバッグ
+            print(f"🚨 [DEBUG] AWS API レスポンス構造: {type(data)}")
+            print(f"🚨 [DEBUG] AWS API レスポンスキー: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            
+            if 'offers' in data:
+                offers = data['offers']
+                print(f"🚨 [DEBUG] offers構造: {type(offers)}")
+                print(f"🚨 [DEBUG] offersサイズ: {len(offers) if hasattr(offers, '__len__') else 'No length'}")
+                
+                # 最初の数個のofferをサンプル表示
+                if isinstance(offers, dict) and offers:
+                    sample_keys = list(offers.keys())[:3]
+                    print(f"🚨 [DEBUG] サンプルofferキー: {sample_keys}")
+                    
+                    for sample_key in sample_keys:
+                        sample_offer = offers[sample_key]
+                        print(f"🚨 [DEBUG] サンプルoffer '{sample_key}': {sample_offer}")
+                        break  # 1つだけ詳細表示
+            else:
+                print(f"🚨 [DEBUG] 'offers'キーがレスポンスに存在しません")
+            
+            processed_count = 0
             for offer in data.get('offers', {}).values():
                 service_name = offer.get('serviceName', '').lower()
                 service_code = offer.get('offerCode', '')
+                
+                # 処理の詳細をデバッグ
+                if processed_count < 3:  # 最初の3つだけ詳細ログ
+                    print(f"🚨 [DEBUG] 処理中offer: serviceName='{offer.get('serviceName', '')}', offerCode='{offer.get('offerCode', '')}'")
+                    print(f"🚨 [DEBUG] 正規化後: service_name='{service_name}', service_code='{service_code}'")
+                
                 if service_name and service_code:
                     self.service_codes[service_name] = service_code
+                    processed_count += 1
+                elif processed_count < 3:
+                    print(f"🚨 [DEBUG] スキップ: service_name='{service_name}', service_code='{service_code}'")
             
             self.last_updated = datetime.now()
             self.logger.info(f"Loaded {len(self.service_codes)} AWS service codes")
             print(f"🚨 [DEBUG] AWS API から {len(self.service_codes)} 個のサービスコードを読み込み完了")
+            print(f"🚨 [DEBUG] 処理されたofferの総数: {processed_count}")
+            
+            # APIが成功したが0個の場合もフォールバックを使用
+            if len(self.service_codes) == 0:
+                print(f"🚨 [DEBUG] AWS API成功だが0個のサービスコード、フォールバックに切り替え")
+                self._load_fallback_codes()
                     
         except Exception as e:
             self.logger.warning(f"Failed to load service codes from API: {e}")
