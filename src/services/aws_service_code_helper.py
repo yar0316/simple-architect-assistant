@@ -22,11 +22,14 @@ class AWSServiceCodeHelper:
         Args:
             cache_duration: キャッシュの有効期間（時間）
         """
+        print(f"🚨 [DEBUG] AWSServiceCodeHelper.__init__ 開始")
         self.service_codes = None
         self.cache_duration = cache_duration
         self.last_updated = None
         self.logger = logging.getLogger(__name__)
+        print(f"🚨 [DEBUG] AWSServiceCodeHelper初期化完了、_load_service_codes呼び出し開始")
         self._load_service_codes()
+        print(f"🚨 [DEBUG] AWSServiceCodeHelper.__init__ 完了, service_codes状況: {bool(self.service_codes)}")
     
     def _load_service_codes(self):
         """AWS Price List APIからサービスコードを取得"""
@@ -338,8 +341,15 @@ def get_service_code_helper() -> AWSServiceCodeHelper:
         AWSServiceCodeHelperのインスタンス
     """
     global _service_code_helper
+    print(f"🚨 [DEBUG] get_service_code_helper呼び出し, 既存インスタンス: {_service_code_helper is not None}")
+    
     if _service_code_helper is None:
+        print(f"🚨 [DEBUG] 新しいAWSServiceCodeHelperインスタンス作成中")
         _service_code_helper = AWSServiceCodeHelper()
+        print(f"🚨 [DEBUG] AWSServiceCodeHelperインスタンス作成完了: {type(_service_code_helper)}")
+    else:
+        print(f"🚨 [DEBUG] 既存のAWSServiceCodeHelperインスタンス使用: {type(_service_code_helper)}")
+    
     return _service_code_helper
 
 

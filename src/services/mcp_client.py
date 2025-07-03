@@ -629,6 +629,19 @@ resource "aws_iam_role" "lambda_role" {
                 service_code_helper = get_service_code_helper()
                 self.logger.error(f"🚨 [DEBUG] サービスコードヘルパー取得成功: {type(service_code_helper)}")
                 print(f"🚨 [DEBUG] サービスコードヘルパー取得成功: {type(service_code_helper)}")
+                
+                # ヘルパーインスタンスの詳細状態を確認
+                self.logger.error(f"🚨 [DEBUG] ヘルパーインスタンスID: {id(service_code_helper)}")
+                print(f"🚨 [DEBUG] ヘルパーインスタンスID: {id(service_code_helper)}")
+                
+                # service_codesの状態を直接確認
+                self.logger.error(f"🚨 [DEBUG] service_codes属性: {hasattr(service_code_helper, 'service_codes')}")
+                print(f"🚨 [DEBUG] service_codes属性: {hasattr(service_code_helper, 'service_codes')}")
+                
+                if hasattr(service_code_helper, 'service_codes'):
+                    self.logger.error(f"🚨 [DEBUG] service_codes値: {service_code_helper.service_codes}")
+                    print(f"🚨 [DEBUG] service_codes値: {service_code_helper.service_codes}")
+                
             except Exception as helper_error:
                 self.logger.error(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
                 print(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
@@ -649,7 +662,18 @@ resource "aws_iam_role" "lambda_role" {
                 self.logger.error(f"🚨 [DEBUG] サービスコード辞書が空または未初期化")
                 print(f"🚨 [DEBUG] サービスコード辞書が空または未初期化")
             
-            service_code = service_code_helper.find_service_code(service_name_input)
+            # find_service_codeメソッド直接呼び出し
+            self.logger.error(f"🚨 [DEBUG] find_service_code呼び出し直前: '{service_name_input}'")
+            print(f"🚨 [DEBUG] find_service_code呼び出し直前: '{service_name_input}'")
+            
+            try:
+                service_code = service_code_helper.find_service_code(service_name_input)
+                self.logger.error(f"🚨 [DEBUG] find_service_code呼び出し成功")
+                print(f"🚨 [DEBUG] find_service_code呼び出し成功")
+            except Exception as find_error:
+                self.logger.error(f"🚨 [DEBUG] find_service_code呼び出し例外: {find_error}")
+                print(f"🚨 [DEBUG] find_service_code呼び出し例外: {find_error}")
+                service_code = None
             
             self.logger.error(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")
             print(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")
