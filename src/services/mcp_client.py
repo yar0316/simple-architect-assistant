@@ -569,6 +569,433 @@ resource "aws_iam_role" "lambda_role" {
             self.logger.error(f"Terraform コード生成エラー: {e}")
             return None
     
+    def get_cost_estimation(self, service_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        AWS構成のコスト見積もりをCost Analysis MCP Serverから取得
+        
+        Args:
+            service_config: サービス構成情報 {
+                "service_name": str,    # EC2, S3, RDS等
+                "region": str,          # us-east-1等
+                "instance_type": str,   # t3.medium等 (EC2の場合)
+                "usage_details": dict   # 使用量詳細
+            }
+            
+        Returns:
+            コスト見積もり結果、またはエラー時はNone {
+                "cost": float,              # 月額コスト
+                "detail": str,              # 構成詳細
+                "optimization": str,        # 最適化提案
+                "current_state": str,       # 現在の状態
+                "reduction_rate": float     # 削減率 (0.0-1.0)
+            }
+        """
+        # キャッシュから確認
+        cache_key_data = f"{service_config.get('service_name')}_{service_config.get('instance_type', 'default')}_{service_config.get('region', 'us-east-1')}"
+        cached_result = self.request_cache.get("get_cost_estimation", cache_key_data)
+        if cached_result is not None:
+            return cached_result
+        
+        try:
+            # 実際のCost Analysis MCP Serverを呼び出し
+            service_name = service_config.get("service_name", "").upper()
+            region = service_config.get("region", "us-east-1")
+            instance_type = service_config.get("instance_type")
+            
+            # Cost Analysis MCP Serverに送信する自然言語クエリを作成
+            query = f"Provide cost estimate for AWS {service_name}"
+            if instance_type:
+                query += f" using {instance_type} instance"
+            query += f" in {region} region"
+            if service_config.get("usage_details"):
+                query += f" with usage: {service_config['usage_details']}"
+            
+            # 実際のMCPサーバー呼び出し
+            mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cost", query=query)
+            
+            if mcp_result and isinstance(mcp_result, dict):
+                # MCPサーバーの結果を既存の形式に変換
+                result = self._convert_mcp_result_to_standard_format(mcp_result, service_name, instance_type, region)
+                
+                # 結果をキャッシュに保存（コスト見積もりは短期間有効）
+                if result:
+                    self.request_cache.set("get_cost_estimation", result, 300, cache_key_data)  # 5分キャッシュ
+                
+                return result
+            else:
+                # MCPサーバーからの応答が無効な場合はフォールバック
+                self.logger.warning(f"MCPサーバーからの無効な応答、フォールバック使用: {service_name}")
+                return self._calculate_fallback_cost_estimate(service_name, region, instance_type)
+                
+        except Exception as e:
+            self.logger.error(f"Cost Analysis MCP Server呼び出しエラー: {e}")
+            # エラー時はフォールバック計算を使用
+            return self._calculate_fallback_cost_estimate(
+                service_config.get("service_name", "").upper(), 
+                service_config.get("region", "us-east-1"), 
+                service_config.get("instance_type")
+            )
+    
+    def _convert_mcp_result_to_standard_format(self, mcp_result: Dict[str, Any], service_name: str, instance_type: Optional[str], region: str) -> Optional[Dict[str, Any]]:
+        """
+        Cost Analysis MCP Serverの結果を標準形式に変換
+        
+        Args:
+            mcp_result: MCPサーバーからの生の結果
+            service_name: AWSサービス名
+            instance_type: インスタンスタイプ
+            region: AWSリージョン
+            
+        Returns:
+            標準形式のコスト見積もり
+        """
+        try:
+            # MCPサーバーの結果から必要な情報を抽出
+            # 実際のMCPサーバーのレスポンス形式に応じて調整が必要
+            
+            # レスポンスが文字列の場合
+            if isinstance(mcp_result, str):
+                return self._parse_text_cost_result(mcp_result, service_name, instance_type, region)
+            
+            # レスポンスが辞書の場合
+            monthly_cost = 0
+            detail = f"{service_name}"
+            if instance_type:
+                detail += f" {instance_type}"
+            detail += f" ({region})"
+                
+            # MCPサーバーから価格情報を抽出（一般的なフィールド名で試行）
+            if "cost" in mcp_result:
+                monthly_cost = float(mcp_result["cost"])
+            elif "price" in mcp_result:
+                monthly_cost = float(mcp_result["price"])
+            elif "monthly_cost" in mcp_result:
+                monthly_cost = float(mcp_result["monthly_cost"])
+            else:
+                # 数値を含む文字列から価格を抽出
+                import re
+                text = str(mcp_result)
+                price_matches = re.findall(r'\$?(\d+\.?\d*)', text)
+                if price_matches:
+                    monthly_cost = float(price_matches[0])
+            
+            # 最適化提案を抽出
+            optimization = mcp_result.get("optimization", "Reserved Instance検討")
+            if "recommendation" in mcp_result:
+                optimization = mcp_result["recommendation"]
+            
+            return {
+                "cost": monthly_cost,
+                "detail": detail,
+                "optimization": optimization,
+                "current_state": "オンデマンド",
+                "reduction_rate": 0.25  # デフォルト削減率
+            }
+            
+        except Exception as e:
+            self.logger.error(f"MCP結果変換エラー: {e}")
+            return None
+    
+    def _parse_text_cost_result(self, text_result: str, service_name: str, instance_type: Optional[str], region: str) -> Dict[str, Any]:
+        """
+        テキスト形式のMCP結果から価格情報を抽出
+        
+        Args:
+            text_result: MCPサーバーからのテキスト結果
+            service_name: AWSサービス名
+            instance_type: インスタンスタイプ
+            region: AWSリージョン
+            
+        Returns:
+            標準形式のコスト見積もり
+        """
+        import re
+        
+        # 価格パターンを検索（$記号付きまたは数値のみ）
+        price_patterns = [
+            r'\$(\d+\.?\d*)\s*(?:per\s+month|monthly|\/month)',
+            r'(\d+\.?\d*)\s*USD\s*(?:per\s+month|monthly|\/month)',
+            r'\$(\d+\.?\d*)',
+            r'(\d+\.?\d*)\s*USD'
+        ]
+        
+        monthly_cost = 0
+        for pattern in price_patterns:
+            match = re.search(pattern, text_result, re.IGNORECASE)
+            if match:
+                monthly_cost = float(match.group(1))
+                break
+        
+        # 詳細情報を構築
+        detail = f"{service_name}"
+        if instance_type:
+            detail += f" {instance_type}"
+        detail += f" ({region})"
+        
+        # 最適化提案をテキストから抽出
+        optimization = "Reserved Instance検討"
+        if "reserved" in text_result.lower():
+            optimization = "Reserved Instance利用"
+        elif "spot" in text_result.lower():
+            optimization = "Spot Instance検討"
+        elif "saving" in text_result.lower():
+            optimization = "Savings Plans検討"
+        
+        return {
+            "cost": monthly_cost,
+            "detail": detail,
+            "optimization": optimization,
+            "current_state": "オンデマンド",
+            "reduction_rate": 0.25
+        }
+    
+    def _calculate_fallback_cost_estimate(self, service_name: str, region: str, instance_type: Optional[str]) -> Dict[str, Any]:
+        """
+        MCP呼び出し失敗時のフォールバック計算
+        
+        Args:
+            service_name: AWSサービス名
+            region: AWSリージョン
+            instance_type: インスタンスタイプ
+            
+        Returns:
+            フォールバック計算されたコスト見積もり
+        """
+        # 既存の動的計算ロジックを簡略化して使用
+        region_multiplier = {
+            "us-east-1": 1.0, "us-west-2": 1.05, "eu-west-1": 1.1,
+            "ap-northeast-1": 1.15, "ap-southeast-1": 1.12
+        }.get(region, 1.0)
+        
+        instance_multiplier = {
+            "t3.nano": 0.5, "t3.micro": 0.75, "t3.small": 1.0,
+            "t3.medium": 1.5, "t3.large": 2.0, "t3.xlarge": 3.0
+        }.get(instance_type, 1.0) if instance_type else 1.0
+        
+        base_costs = {
+            "EC2": 25, "S3": 20, "RDS": 70, "LAMBDA": 12, 
+            "CLOUDFRONT": 18, "VPC": 8
+        }
+        
+        base_cost = base_costs.get(service_name, 30)
+        final_cost = base_cost * region_multiplier * instance_multiplier
+        
+        return {
+            "cost": final_cost,
+            "detail": f"{service_name} {instance_type or '標準'} ({region}) [フォールバック]",
+            "optimization": "詳細分析が必要",
+            "current_state": "デフォルト構成",
+            "reduction_rate": 0.15
+        }
+    
+    
+    def analyze_cost_with_natural_language(self, query: str) -> Optional[str]:
+        """
+        自然言語でのコスト問い合わせ（Cost Analysis MCP Server）
+        
+        Args:
+            query: 自然言語でのコスト関連質問
+            
+        Returns:
+            コスト分析結果、またはエラー時はNone
+        """
+        # キャッシュから確認
+        cached_result = self.request_cache.get("analyze_cost_with_natural_language", query)
+        if cached_result is not None:
+            return cached_result
+        
+        try:
+            # Cost Analysis MCP Serverの自然言語クエリ機能を呼び出し
+            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cost", query=query)
+            
+            if result:
+                # 結果をキャッシュに保存（長期間有効）
+                self.request_cache.set("analyze_cost_with_natural_language", result, 600, query)  # 10分キャッシュ
+                return str(result)
+            else:
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"自然言語コスト分析エラー: {e}")
+            return None
+    
+    def analyze_infrastructure_project_cost(self, project_path: str, project_type: str = "terraform") -> Optional[Dict[str, Any]]:
+        """
+        CDK/Terraformプロジェクトのコスト分析
+        
+        Args:
+            project_path: プロジェクトファイルパス
+            project_type: プロジェクトタイプ ("terraform", "cdk")
+            
+        Returns:
+            プロジェクトコスト分析結果、またはエラー時はNone
+        """
+        # キャッシュから確認
+        cache_key = f"{project_path}_{project_type}"
+        cached_result = self.request_cache.get("analyze_infrastructure_project_cost", cache_key)
+        if cached_result is not None:
+            return cached_result
+        
+        try:
+            # Cost Analysis MCP ServerのIaCプロジェクト分析機能を呼び出し
+            if project_type.lower() == "terraform":
+                result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_terraform", project_path=project_path)
+            elif project_type.lower() == "cdk":
+                result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "analyze_cdk", project_path=project_path)
+            else:
+                self.logger.error(f"サポートされていないプロジェクトタイプ: {project_type}")
+                return None
+            
+            if result:
+                # 結果をキャッシュに保存（中期間有効）
+                self.request_cache.set("analyze_infrastructure_project_cost", result, 900, cache_key)  # 15分キャッシュ
+                return result
+            else:
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"IaCプロジェクトコスト分析エラー: {e}")
+            return None
+    
+    def generate_comprehensive_cost_report(self, services: List[str], region: str = "us-east-1") -> Optional[str]:
+        """
+        包括的なコストレポート生成
+        
+        Args:
+            services: 分析対象AWSサービスリスト
+            region: 対象リージョン
+            
+        Returns:
+            包括的なコストレポート、またはエラー時はNone
+        """
+        # キャッシュから確認
+        cache_key = f"{'-'.join(sorted(services))}_{region}"
+        cached_result = self.request_cache.get("generate_comprehensive_cost_report", cache_key)
+        if cached_result is not None:
+            return cached_result
+        
+        try:
+            # サービスリストとリージョンを含むクエリを構築
+            query = f"Generate comprehensive cost report for AWS services: {', '.join(services)} in {region} region with optimization recommendations"
+            
+            # Cost Analysis MCP Serverの包括的レポート生成機能を呼び出し
+            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "generate_report", 
+                                      services=services, region=region, query=query)
+            
+            if result:
+                # 結果をキャッシュに保存（短期間有効）
+                self.request_cache.set("generate_comprehensive_cost_report", result, 300, cache_key)  # 5分キャッシュ
+                return str(result)
+            else:
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"包括的コストレポート生成エラー: {e}")
+            return None
+    
+    def get_cost_optimization_recommendations(self, current_setup: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """
+        コスト最適化推奨事項の取得
+        
+        Args:
+            current_setup: 現在のAWS構成情報
+            
+        Returns:
+            最適化推奨事項リスト、またはエラー時はNone
+        """
+        # キャッシュから確認
+        cache_key = str(sorted(current_setup.items()))
+        cached_result = self.request_cache.get("get_cost_optimization_recommendations", cache_key)
+        if cached_result is not None:
+            return cached_result
+        
+        try:
+            # Cost Analysis MCP Serverの最適化推奨機能を呼び出し
+            query = f"Provide cost optimization recommendations for current AWS setup: {current_setup}"
+            result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "optimize_cost", 
+                                      current_setup=current_setup, query=query)
+            
+            if result:
+                # 結果をリスト形式に変換
+                if isinstance(result, str):
+                    # テキスト結果を構造化データに変換
+                    recommendations = self._parse_optimization_recommendations(result)
+                elif isinstance(result, list):
+                    recommendations = result
+                else:
+                    recommendations = [{"recommendation": str(result), "priority": "medium"}]
+                
+                # 結果をキャッシュに保存（中期間有効）
+                self.request_cache.set("get_cost_optimization_recommendations", recommendations, 600, cache_key)  # 10分キャッシュ
+                return recommendations
+            else:
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"コスト最適化推奨事項取得エラー: {e}")
+            return None
+    
+    def _parse_optimization_recommendations(self, text_result: str) -> List[Dict[str, Any]]:
+        """
+        テキスト形式の最適化推奨事項を構造化データに変換
+        
+        Args:
+            text_result: テキスト形式の推奨事項
+            
+        Returns:
+            構造化された推奨事項リスト
+        """
+        import re
+        
+        recommendations = []
+        
+        # 推奨事項のパターンを検索
+        lines = text_result.split('\n')
+        current_recommendation = {}
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # 推奨事項の開始を検出
+            if re.match(r'^\d+\.', line) or line.startswith('-') or line.startswith('•'):
+                if current_recommendation:
+                    recommendations.append(current_recommendation)
+                
+                current_recommendation = {
+                    "recommendation": line,
+                    "priority": "medium",
+                    "estimated_savings": None
+                }
+            
+            # 節約額を抽出
+            savings_match = re.search(r'\$(\d+\.?\d*)', line)
+            if savings_match and current_recommendation:
+                current_recommendation["estimated_savings"] = float(savings_match.group(1))
+            
+            # 優先度を推定
+            if any(keyword in line.lower() for keyword in ["critical", "high", "urgent"]):
+                current_recommendation["priority"] = "high"
+            elif any(keyword in line.lower() for keyword in ["low", "minor", "optional"]):
+                current_recommendation["priority"] = "low"
+        
+        # 最後の推奨事項を追加
+        if current_recommendation:
+            recommendations.append(current_recommendation)
+        
+        # 推奨事項が見つからない場合は汎用的な推奨事項を返す
+        if not recommendations:
+            recommendations = [
+                {
+                    "recommendation": "Reserved Instancesの検討",
+                    "priority": "medium",
+                    "estimated_savings": None
+                }
+            ]
+        
+        return recommendations
+
     def get_cache_stats(self) -> Dict[str, Any]:
         """キャッシュ統計を取得"""
         return self.request_cache.get_stats()

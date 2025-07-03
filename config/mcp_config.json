@@ -38,6 +38,21 @@
       },
       "autoApprove": [],
       "disabled": false
+    },
+    "awslabs.cost-analysis-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "awslabs-cost-analysis-mcp-server",
+        "awslabs.cost-analysis-mcp-server.exe"
+      ],
+      "env": {
+        "SHELL": "/usr/bin/zsh",
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "AWS_PROFILE": "default"
+      },
+      "autoApprove": [],
+      "disabled": false
     }
   },
   "platform_overrides": {
@@ -60,6 +75,12 @@
           "args": [
             "awslabs.terraform-mcp-server@latest"
           ]
+        },
+        "awslabs.cost-analysis-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.cost-analysis-mcp-server@latest"
+          ]
         }
       }
     },
@@ -81,6 +102,12 @@
           "command": "uvx",
           "args": [
             "awslabs.terraform-mcp-server@latest"
+          ]
+        },
+        "awslabs.cost-analysis-mcp-server": {
+          "command": "uvx",
+          "args": [
+            "awslabs.cost-analysis-mcp-server@latest"
           ]
         }
       }

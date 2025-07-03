@@ -246,50 +246,52 @@ class LangChainMCPManager:
                     if not aws_services:
                         aws_services = ["EC2", "S3", "VPC"]
                     
-                    cost_estimates = {
-                        "EC2": {
-                            "cost": 50,
-                            "detail": "t3.medium×2台",
-                            "optimization": "Reserved Instance",
-                            "current_state": "オンデマンド",
-                            "reduction_rate": 0.30
-                        },
-                        "S3": {
-                            "cost": 25,
-                            "detail": "100GB Standard",
-                            "optimization": "IA + Glacier",
-                            "current_state": "Standard",
-                            "reduction_rate": 0.48
-                        },
-                        "RDS": {
-                            "cost": 85,
-                            "detail": "db.t3.small Multi-AZ",
-                            "optimization": "Single-AZ",
-                            "current_state": "Multi-AZ",
-                            "reduction_rate": 0.50
-                        },
-                        "Lambda": {
-                            "cost": 15,
-                            "detail": "100万リクエスト/月",
-                            "optimization": "Provisioned Concurrency最適化",
-                            "current_state": "オンデマンド実行",
-                            "reduction_rate": 0.20
-                        },
-                        "CloudFront": {
-                            "cost": 20,
-                            "detail": "1TB転送/月",
-                            "optimization": "キャッシュ設定最適化",
-                            "current_state": "標準設定",
-                            "reduction_rate": 0.20
-                        },
-                        "VPC": {
-                            "cost": 10,
-                            "detail": "NAT Gateway×2",
-                            "optimization": "NAT Instance",
-                            "current_state": "NAT Gateway",
-                            "reduction_rate": 0.70
-                        }
-                    }
+                    # MCPサーバーから動的にコスト見積もりを取得
+                    cost_estimates = {}
+                    
+                    # 各サービスについてMCPクライアントから見積もりを取得
+                    for service in aws_services:
+                        try:
+                            # サービス構成情報を準備
+                            service_config = {
+                                "service_name": service,
+                                "region": "us-east-1",  # デフォルトリージョン
+                                "usage_details": {}
+                            }
+                            
+                            # 要件文字列からインスタンスタイプを推定
+                            if service in ["EC2", "RDS"]:
+                                if "small" in service_requirements.lower():
+                                    service_config["instance_type"] = "t3.small" if service == "EC2" else "db.t3.small"
+                                elif "large" in service_requirements.lower():
+                                    service_config["instance_type"] = "t3.large" if service == "EC2" else "db.t3.large"
+                                else:
+                                    service_config["instance_type"] = "t3.medium" if service == "EC2" else "db.t3.small"
+                            
+                            # MCPクライアントからコスト見積もりを取得
+                            estimate = mcp_client_service.get_cost_estimation(service_config)
+                            
+                            if estimate:
+                                cost_estimates[service] = estimate
+                            else:
+                                # フォールバック: 基本的な見積もり
+                                cost_estimates[service] = {
+                                    "cost": 30,
+                                    "detail": f"{service} 基本構成",
+                                    "optimization": "詳細分析が必要",
+                                    "current_state": "デフォルト",
+                                    "reduction_rate": 0.15
+                                }
+                                
+                        except Exception as service_error:
+                            # 個別サービスエラーでも処理を継続
+                            cost_estimates[service] = {
+                                "cost": 25,
+                                "detail": f"{service} 見積もり要",
+                                "optimization": "詳細な要件確認が必要",
+                                "current_state": "不明",
+                                "reduction_rate": 0.10
+                            }
                     
                     # テンプレートベースでレポートを生成
                     result = generate_cost_analysis_report(aws_services, cost_estimates, cost_guidance, cost_docs)

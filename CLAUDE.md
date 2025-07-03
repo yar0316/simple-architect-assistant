@@ -27,7 +27,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **ユーザーの要求を受けたら即座に`gemini -p <質問内容>`で壁打ち**を必ず実施
 - Geminiの意見を鵜呑みにせず、1意見として判断。聞き方を変えて多角的な意見を抽出
 - 基本的にGeminiは検索を絡めて利用すること
-- Claude Code内蔵のWebSearchツールは使用しない
+- Claude Code内蔵のWebSearchツールは、Geminiがエラーで検索できないとき以外に使用しない
 - Geminiがエラーの場合は、聞き方を工夫してリトライ：
   - ファイル名や実行コマンドを渡す（Geminiがコマンドを実行可能）
   - 複数回に分割して聞く
@@ -121,6 +121,7 @@ region = "us-east-1"  # Bedrockが利用可能なリージョン
 ### アプリケーションフロー
 
 #### エージェントモード（デフォルト）
+
 1. ユーザーがチャットインターフェースでAWSインフラ要件を入力
 2. LangChain ReAct Agent が要件を分析し、必要なツールを自動選択
 3. Agent が以下を実行：
@@ -131,6 +132,7 @@ region = "us-east-1"  # Bedrockが利用可能なリージョン
 5. ストリーミングレスポンスでClaude 4 Sonnetが最終回答を提供
 
 #### 手動モード
+
 1. ユーザーがチャットインターフェースでAWSインフラ要件を入力
 2. システムがファイルからAWSソリューションアーキテクトプロンプトを読み込み
 3. 事前定義されたMCPツール呼び出しで補足情報を取得
