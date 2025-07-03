@@ -627,7 +627,7 @@ resource "aws_iam_role" "lambda_role" {
                     self.logger.error(f"Web価格取得も失敗: {web_error}")
                     mcp_result = None
             
-            if mcp_result and isinstance(mcp_result, dict):
+            if mcp_result:
                 # MCPサーバーの結果を既存の形式に変換
                 result = self._convert_mcp_result_to_standard_format(mcp_result, service_name, instance_type, region)
                 
@@ -638,7 +638,7 @@ resource "aws_iam_role" "lambda_role" {
                 return result
             else:
                 # MCPサーバーからの応答が無効な場合はフォールバック
-                self.logger.warning(f"MCPサーバーからの無効な応答、フォールバック使用: {service_name}")
+                self.logger.info(f"MCPサーバーからの応答がない、フォールバック使用: {service_name}")
                 return self._calculate_fallback_cost_estimate(service_name, region, instance_type)
                 
         except Exception as e:
@@ -650,7 +650,7 @@ resource "aws_iam_role" "lambda_role" {
                 service_config.get("instance_type")
             )
     
-    def _convert_mcp_result_to_standard_format(self, mcp_result: Dict[str, Any], service_name: str, instance_type: Optional[str], region: str) -> Optional[Dict[str, Any]]:
+    def _convert_mcp_result_to_standard_format(self, mcp_result: Any, service_name: str, instance_type: Optional[str], region: str) -> Optional[Dict[str, Any]]:
         """
         Cost Analysis MCP Serverの結果を標準形式に変換
         
@@ -672,39 +672,43 @@ resource "aws_iam_role" "lambda_role" {
                 return self._parse_text_cost_result(mcp_result, service_name, instance_type, region)
             
             # レスポンスが辞書の場合
-            monthly_cost = 0
-            detail = f"{service_name}"
-            if instance_type:
-                detail += f" {instance_type}"
-            detail += f" ({region})"
+            if isinstance(mcp_result, dict):
+                monthly_cost = 0
+                detail = f"{service_name}"
+                if instance_type:
+                    detail += f" {instance_type}"
+                detail += f" ({region})"
+                    
+                # MCPサーバーから価格情報を抽出（一般的なフィールド名で試行）
+                if "cost" in mcp_result:
+                    monthly_cost = float(mcp_result["cost"])
+                elif "price" in mcp_result:
+                    monthly_cost = float(mcp_result["price"])
+                elif "monthly_cost" in mcp_result:
+                    monthly_cost = float(mcp_result["monthly_cost"])
+                else:
+                    # 数値を含む文字列から価格を抽出
+                    import re
+                    text = str(mcp_result)
+                    price_matches = re.findall(r'\$?(\d+\.?\d*)', text)
+                    if price_matches:
+                        monthly_cost = float(price_matches[0])
                 
-            # MCPサーバーから価格情報を抽出（一般的なフィールド名で試行）
-            if "cost" in mcp_result:
-                monthly_cost = float(mcp_result["cost"])
-            elif "price" in mcp_result:
-                monthly_cost = float(mcp_result["price"])
-            elif "monthly_cost" in mcp_result:
-                monthly_cost = float(mcp_result["monthly_cost"])
-            else:
-                # 数値を含む文字列から価格を抽出
-                import re
-                text = str(mcp_result)
-                price_matches = re.findall(r'\$?(\d+\.?\d*)', text)
-                if price_matches:
-                    monthly_cost = float(price_matches[0])
+                # 最適化提案を抽出
+                optimization = mcp_result.get("optimization", "Reserved Instance検討")
+                if "recommendation" in mcp_result:
+                    optimization = mcp_result["recommendation"]
+                
+                return {
+                    "cost": monthly_cost,
+                    "detail": detail,
+                    "optimization": optimization,
+                    "current_state": "オンデマンド",
+                    "reduction_rate": 0.25  # デフォルト削減率
+                }
             
-            # 最適化提案を抽出
-            optimization = mcp_result.get("optimization", "Reserved Instance検討")
-            if "recommendation" in mcp_result:
-                optimization = mcp_result["recommendation"]
-            
-            return {
-                "cost": monthly_cost,
-                "detail": detail,
-                "optimization": optimization,
-                "current_state": "オンデマンド",
-                "reduction_rate": 0.25  # デフォルト削減率
-            }
+            # その他の型（リスト、None等）の場合は文字列に変換してテキスト解析
+            return self._parse_text_cost_result(str(mcp_result), service_name, instance_type, region)
             
         except Exception as e:
             self.logger.error(f"MCP結果変換エラー: {e}")
