@@ -250,6 +250,8 @@ class LangChainMCPManager:
                     # 各サービスについてMCPクライアントから見積もりを取得
                     for service in aws_services:
                         try:
+                            logging.info(f"🔄 エージェントツール: {service}のコスト分析開始")
+                            
                             # サービス構成情報を準備
                             service_config = {
                                 "service_name": service,
@@ -267,11 +269,14 @@ class LangChainMCPManager:
                                     service_config["instance_type"] = "t3.medium" if service == "EC2" else "db.t3.small"
                             
                             # MCPクライアントからコスト見積もりを取得
+                            logging.info(f"📞 MCPクライアント呼び出し: {service} -> {service_config}")
                             estimate = mcp_client_service.get_cost_estimation(service_config)
                             
                             if estimate:
+                                logging.info(f"✅ MCPクライアント成功: {service} -> {estimate.get('cost', 'N/A')}USD/月")
                                 cost_estimates[service] = estimate
                             else:
+                                logging.warning(f"❌ MCPクライアント失敗: {service} -> フォールバック使用")
                                 # フォールバック: 基本的な見積もり
                                 cost_estimates[service] = {
                                     "cost": 30,
@@ -282,6 +287,7 @@ class LangChainMCPManager:
                                 }
                                 
                         except Exception as service_error:
+                            logging.error(f"🚨 エージェントツール例外: {service} -> {service_error}")
                             # 個別サービスエラーでも処理を継続
                             cost_estimates[service] = {
                                 "cost": 25,
