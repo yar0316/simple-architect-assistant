@@ -634,6 +634,21 @@ resource "aws_iam_role" "lambda_role" {
                 print(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
                 return self._calculate_fallback_cost_estimate(service_name_input.upper(), region, instance_type)
             
+            # AWSServiceCodeHelperの内部状況をデバッグ
+            self.logger.error(f"🚨 [DEBUG] サービスコード辞書の状況: {bool(service_code_helper.service_codes)}")
+            print(f"🚨 [DEBUG] サービスコード辞書の状況: {bool(service_code_helper.service_codes)}")
+            
+            if service_code_helper.service_codes:
+                self.logger.error(f"🚨 [DEBUG] 辞書サイズ: {len(service_code_helper.service_codes)}")
+                print(f"🚨 [DEBUG] 辞書サイズ: {len(service_code_helper.service_codes)}")
+                # 最初の5つのキーを表示
+                sample_keys = list(service_code_helper.service_codes.keys())[:5]
+                self.logger.error(f"🚨 [DEBUG] サンプルキー: {sample_keys}")
+                print(f"🚨 [DEBUG] サンプルキー: {sample_keys}")
+            else:
+                self.logger.error(f"🚨 [DEBUG] サービスコード辞書が空または未初期化")
+                print(f"🚨 [DEBUG] サービスコード辞書が空または未初期化")
+            
             service_code = service_code_helper.find_service_code(service_name_input)
             
             self.logger.error(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")

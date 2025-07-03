@@ -31,16 +31,23 @@ class AWSServiceCodeHelper:
     def _load_service_codes(self):
         """AWS Price List APIからサービスコードを取得"""
         try:
+            # デバッグログ追加
+            print(f"🚨 [DEBUG] AWSServiceCodeHelper._load_service_codes 開始")
+            self.logger.error(f"🚨 [DEBUG] AWSServiceCodeHelper._load_service_codes 開始")
+            
             # キャッシュの有効性をチェック
             if self._is_cache_valid():
                 self.logger.debug("Service codes cache is still valid")
+                print(f"🚨 [DEBUG] キャッシュ有効、読み込みスキップ")
                 return
                 
             self.logger.info("Loading AWS service codes from Price List API...")
+            print(f"🚨 [DEBUG] AWS Price List API から読み込み開始")
             url = "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/index.json"
             
             response = requests.get(url, timeout=30)
             response.raise_for_status()
+            print(f"🚨 [DEBUG] AWS API レスポンス成功: {response.status_code}")
             
             data = response.json()
             self.service_codes = {}
@@ -53,9 +60,11 @@ class AWSServiceCodeHelper:
             
             self.last_updated = datetime.now()
             self.logger.info(f"Loaded {len(self.service_codes)} AWS service codes")
+            print(f"🚨 [DEBUG] AWS API から {len(self.service_codes)} 個のサービスコードを読み込み完了")
                     
         except Exception as e:
             self.logger.warning(f"Failed to load service codes from API: {e}")
+            print(f"🚨 [DEBUG] AWS API 失敗、フォールバックコード読み込み: {e}")
             # フォールバック用の主要サービスコード
             self._load_fallback_codes()
     
@@ -69,6 +78,7 @@ class AWSServiceCodeHelper:
     
     def _load_fallback_codes(self):
         """フォールバック用の主要サービスコード"""
+        print(f"🚨 [DEBUG] フォールバックサービスコード読み込み開始")
         self.service_codes = {
             # コンピューティング
             "amazon ec2": "AmazonEC2",
@@ -111,6 +121,7 @@ class AWSServiceCodeHelper:
         
         self.last_updated = datetime.now()
         self.logger.info(f"Loaded {len(self.service_codes)} fallback service codes")
+        print(f"🚨 [DEBUG] フォールバックサービスコード読み込み完了: {len(self.service_codes)}個")
     
     def find_service_code(self, service_name: str) -> Optional[str]:
         """
@@ -122,29 +133,41 @@ class AWSServiceCodeHelper:
         Returns:
             サービスコード、見つからない場合はNone
         """
+        print(f"🚨 [DEBUG] find_service_code呼び出し: '{service_name}'")
+        
         if not self.service_codes:
+            print(f"🚨 [DEBUG] service_codes が空、再読み込み実行")
             self._load_service_codes()
             
         if not self.service_codes:
+            print(f"🚨 [DEBUG] service_codes 再読み込み後も空、None返却")
             return None
             
         service_name = service_name.lower().strip()
+        print(f"🚨 [DEBUG] 正規化済みサービス名: '{service_name}'")
         
         # 完全一致チェック
         if service_name in self.service_codes:
-            return self.service_codes[service_name]
+            result = self.service_codes[service_name]
+            print(f"🚨 [DEBUG] 完全一致発見: '{service_name}' -> '{result}'")
+            return result
         
         # 部分一致チェック（双方向）
         for name, code in self.service_codes.items():
             if service_name in name or name in service_name:
+                print(f"🚨 [DEBUG] 部分一致発見: '{service_name}' -> '{code}' (キー: '{name}')")
                 return code
         
         # 別名・略称チェック
         aliases = self._get_service_aliases()
         normalized_name = aliases.get(service_name)
+        print(f"🚨 [DEBUG] 別名チェック: '{service_name}' -> '{normalized_name}'")
         if normalized_name and normalized_name in self.service_codes:
-            return self.service_codes[normalized_name]
+            result = self.service_codes[normalized_name]
+            print(f"🚨 [DEBUG] 別名一致発見: '{normalized_name}' -> '{result}'")
+            return result
         
+        print(f"🚨 [DEBUG] サービスコード見つからず: '{service_name}'")
         return None
     
     def _get_service_aliases(self) -> Dict[str, str]:
