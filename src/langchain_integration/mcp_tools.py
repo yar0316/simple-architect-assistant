@@ -27,6 +27,77 @@ def get_cost_analysis_template():
             _COST_ANALYSIS_TEMPLATE = f"# エラー: テンプレート読み込み失敗\n\n{str(e)}"
     return _COST_ANALYSIS_TEMPLATE
 
+
+def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidance, cost_docs):
+    """テンプレートベースでコスト分析レポートを生成"""
+    
+    # キャッシュされたテンプレートを取得
+    template = get_cost_analysis_template()
+    
+    # エラーテンプレートの場合は早期リターン
+    if template.startswith("# エラー:"):
+        return template
+    
+    # サービス別コスト表を動的生成
+    service_rows = []
+    total_monthly = 0
+    optimization_data = []
+    
+    for service in detected_services:
+        if service in cost_estimates:
+            estimate = cost_estimates[service]
+            monthly_cost = estimate["cost"]
+            total_monthly += monthly_cost
+            yearly_cost = monthly_cost * 12
+            
+            # サービス行を追加
+            service_rows.append(f"| {service} | {estimate['detail']} | ${monthly_cost} | ${yearly_cost} | {estimate['optimization']} |")
+            
+            # 最適化データを追加
+            if estimate.get('reduction_rate', 0) > 0:
+                reduction_amount = monthly_cost * estimate['reduction_rate']
+                optimization_data.append({
+                    'name': f"{service}最適化",
+                    'current': estimate['current_state'],
+                    'optimized': estimate['optimization'],
+                    'savings': reduction_amount,
+                    'percentage': int(estimate['reduction_rate'] * 100)
+                })
+    
+    service_cost_table = "\n".join(service_rows)
+    total_yearly = total_monthly * 12
+    
+    # 最適化提案表を動的生成
+    optimization_rows = []
+    total_savings = 0
+    
+    for opt in optimization_data:
+        optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.0f} | {opt['percentage']}% |")
+        total_savings += opt['savings']
+    
+    optimization_table = "\n".join(optimization_rows)
+    optimized_monthly = total_monthly - total_savings
+    savings_percentage = int((total_savings / total_monthly * 100) if total_monthly > 0 else 0)
+    
+    # ガイダンス情報の処理
+    guidance_text = cost_guidance if cost_guidance else "現在利用可能なガイダンスはありません。"
+    docs_text = cost_docs.get('description', '料金情報は現在利用できません。') if cost_docs and cost_docs.get('description') != 'N/A' else "料金情報は現在利用できません。"
+    
+    # テンプレートに値を注入
+    report = template.format(
+        service_cost_table=service_cost_table,
+        total_monthly=total_monthly,
+        total_yearly=total_yearly,
+        optimization_table=optimization_table,
+        optimized_monthly=optimized_monthly,
+        total_savings=total_savings,
+        savings_percentage=savings_percentage,
+        cost_guidance=guidance_text,
+        cost_docs=docs_text
+    )
+    
+    return report
+
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from langchain_core.tools import BaseTool
@@ -142,77 +213,6 @@ class LangChainMCPManager:
                     # デフォルトでよく使われるサービスを追加
                     if not aws_services:
                         aws_services = ["EC2", "S3", "VPC"]
-                    
-                    # テンプレート処理関数を定義
-                    def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidance, cost_docs):
-                        """テンプレートベースでコスト分析レポートを生成"""
-                        
-                        # キャッシュされたテンプレートを取得
-                        template = get_cost_analysis_template()
-                        
-                        # エラーテンプレートの場合は早期リターン
-                        if template.startswith("# エラー:"):
-                            return template
-                        
-                        # サービス別コスト表を動的生成
-                        service_rows = []
-                        total_monthly = 0
-                        optimization_data = []
-                        
-                        for service in detected_services:
-                            if service in cost_estimates:
-                                estimate = cost_estimates[service]
-                                monthly_cost = estimate["cost"]
-                                total_monthly += monthly_cost
-                                yearly_cost = monthly_cost * 12
-                                
-                                # サービス行を追加
-                                service_rows.append(f"| {service} | {estimate['detail']} | ${monthly_cost} | ${yearly_cost} | {estimate['optimization']} |")
-                                
-                                # 最適化データを追加
-                                if estimate.get('reduction_rate', 0) > 0:
-                                    reduction_amount = monthly_cost * estimate['reduction_rate']
-                                    optimization_data.append({
-                                        'name': f"{service}最適化",
-                                        'current': estimate['current_state'],
-                                        'optimized': estimate['optimization'],
-                                        'savings': reduction_amount,
-                                        'percentage': int(estimate['reduction_rate'] * 100)
-                                    })
-                        
-                        service_cost_table = "\n".join(service_rows)
-                        total_yearly = total_monthly * 12
-                        
-                        # 最適化提案表を動的生成
-                        optimization_rows = []
-                        total_savings = 0
-                        
-                        for opt in optimization_data:
-                            optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.0f} | {opt['percentage']}% |")
-                            total_savings += opt['savings']
-                        
-                        optimization_table = "\n".join(optimization_rows)
-                        optimized_monthly = total_monthly - total_savings
-                        savings_percentage = int((total_savings / total_monthly * 100) if total_monthly > 0 else 0)
-                        
-                        # ガイダンス情報の処理
-                        guidance_text = cost_guidance if cost_guidance else "現在利用可能なガイダンスはありません。"
-                        docs_text = cost_docs.get('description', '料金情報は現在利用できません。') if cost_docs and cost_docs.get('description') != 'N/A' else "料金情報は現在利用できません。"
-                        
-                        # テンプレートに値を注入
-                        report = template.format(
-                            service_cost_table=service_cost_table,
-                            total_monthly=total_monthly,
-                            total_yearly=total_yearly,
-                            optimization_table=optimization_table,
-                            optimized_monthly=optimized_monthly,
-                            total_savings=total_savings,
-                            savings_percentage=savings_percentage,
-                            cost_guidance=guidance_text,
-                            cost_docs=docs_text
-                        )
-                        
-                        return report
                     
                     cost_estimates = {
                         "EC2": {
