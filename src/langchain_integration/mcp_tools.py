@@ -1,9 +1,10 @@
 """LangChain MCP Adapters統合"""
 import asyncio
-import streamlit as st
-from typing import List, Dict, Any, Optional
 import logging
 import os
+import re
+import streamlit as st
+from typing import List, Dict, Any, Optional
 
 # Page type constants
 PAGE_TYPE_AWS_CHAT = "aws_chat"
@@ -195,7 +196,6 @@ class LangChainMCPManager:
                     result = "💰 **コスト分析結果**\n\n"
                     
                     # 要件からAWSサービスを抽出してコスト概算表を作成
-                    import re
                     aws_services = []
                     service_patterns = {
                         "EC2": r"(?i)ec2|インスタンス|仮想マシン|サーバー",
