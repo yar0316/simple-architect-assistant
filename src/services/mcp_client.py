@@ -20,7 +20,22 @@ import streamlit as st
 import asyncio
 
 # 新しいAWSServiceCodeHelperをインポート
-from .aws_service_code_helper import get_service_code_helper
+try:
+    from .aws_service_code_helper import get_service_code_helper
+    print("🚨 [DEBUG] AWSServiceCodeHelper インポート成功")
+except ImportError as import_error:
+    print(f"🚨 [DEBUG] AWSServiceCodeHelper インポート失敗: {import_error}")
+    
+    # フォールバック関数を定義
+    def get_service_code_helper():
+        class FallbackHelper:
+            def find_service_code(self, service_name):
+                return None
+            def search_services(self, keyword):
+                return []
+            def get_service_info(self, service_name):
+                return None
+        return FallbackHelper()
 
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -605,11 +620,24 @@ resource "aws_iam_role" "lambda_role" {
             region = service_config.get("region", "us-east-1")
             instance_type = service_config.get("instance_type")
             
+            # デバッグ：サービスコードヘルパーの状況を確認
+            self.logger.error(f"🚨 [DEBUG] サービス名入力: '{service_name_input}'")
+            print(f"🚨 [DEBUG] サービス名入力: '{service_name_input}'")
+            
             # サービスコードヘルパーからサービスコードを取得
-            service_code_helper = get_service_code_helper()
+            try:
+                service_code_helper = get_service_code_helper()
+                self.logger.error(f"🚨 [DEBUG] サービスコードヘルパー取得成功: {type(service_code_helper)}")
+                print(f"🚨 [DEBUG] サービスコードヘルパー取得成功: {type(service_code_helper)}")
+            except Exception as helper_error:
+                self.logger.error(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
+                print(f"🚨 [DEBUG] サービスコードヘルパー取得失敗: {helper_error}")
+                return self._calculate_fallback_cost_estimate(service_name_input.upper(), region, instance_type)
+            
             service_code = service_code_helper.find_service_code(service_name_input)
             
-            self.logger.info(f"サービス名変換: '{service_name_input}' → '{service_code}'")
+            self.logger.error(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")
+            print(f"🚨 [DEBUG] サービス名変換: '{service_name_input}' → '{service_code}'")
             
             if not service_code:
                 # サービスコードが見つからない場合、候補を提案

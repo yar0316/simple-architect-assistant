@@ -219,6 +219,9 @@ class LangChainMCPManager:
             def cost_analysis(service_requirements: str) -> str:
                 """AWS構成のコスト分析を実行"""
                 try:
+                    # この関数が呼び出されているかを確認するためのERRORレベルログ
+                    logging.error(f"🚨 [DEBUG] cost_analysis関数が呼び出されました: {service_requirements}")
+                    print(f"🚨 [DEBUG] cost_analysis関数が呼び出されました: {service_requirements}")  # print文も追加
                     # Core MCPからコスト関連ガイダンスを取得
                     cost_guidance = mcp_client_service.get_core_mcp_guidance(f"コスト最適化 {service_requirements}")
                     
