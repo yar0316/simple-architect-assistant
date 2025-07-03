@@ -211,14 +211,7 @@ class MCPClientService:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
                 
-            # プラットフォーム固有の設定を適用
-            if "platform_overrides" in config:
-                platform_config = config["platform_overrides"].get(self.platform, {})
-                if "mcpServers" in platform_config:
-                    # プラットフォーム固有の設定でオーバーライド
-                    for server_name, server_config in platform_config["mcpServers"].items():
-                        if server_name in config["mcpServers"]:
-                            config["mcpServers"][server_name].update(server_config)
+            # platform_overridesは削除されたため、基本設定のみを使用
                             
             return config
             

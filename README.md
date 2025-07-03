@@ -93,7 +93,26 @@ streamlit run src/app.py
 
 ### MCP設定のカスタマイズ
 
-MCP サーバーの設定は `config/mcp_config.json` で管理されています。詳細な設定方法については [MCP セットアップガイド](docs/mcp_setup.md) を参照してください。
+MCP サーバーの設定は各OS向けのサンプルファイルを用意しています：
+
+- **Windows**: `config/mcp_config_windows.json`
+- **Mac**: `config/mcp_config_mac.json`  
+- **Linux**: `config/mcp_config_linux.json`
+
+使用する環境に応じて適切なファイルを `config/mcp_config.json` にコピーしてください：
+
+```bash
+# Windows の場合
+cp config/mcp_config_windows.json config/mcp_config.json
+
+# Mac の場合  
+cp config/mcp_config_mac.json config/mcp_config.json
+
+# Linux の場合
+cp config/mcp_config_linux.json config/mcp_config.json
+```
+
+詳細な設定方法については [MCP セットアップガイド](docs/mcp_setup.md) を参照してください。
 
 **重要**: MCP統合が利用できない場合でも、アプリケーションはフォールバックモードで動作し、基本的な機能は継続して利用できます。
 

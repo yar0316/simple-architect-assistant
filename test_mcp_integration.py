@@ -46,15 +46,8 @@ def test_mcp_config():
             print('\n❌ Cost Analysis MCP Serverが設定されていません')
             return False
         
-        # プラットフォーム設定の確認
-        print('\nプラットフォーム固有設定:')
-        overrides = config.get('platform_overrides', {})
-        for platform, platform_config in overrides.items():
-            platform_servers = platform_config.get('mcpServers', {})
-            if 'awslabs.cost-analysis-mcp-server' in platform_servers:
-                print(f'  ✅ {platform}: Cost Analysis MCP Server設定済み')
-            else:
-                print(f'  ❌ {platform}: Cost Analysis MCP Server未設定')
+        # platform_overridesは削除されたため、スキップ
+        print('\n📝 注意: platform_overridesは削除され、OS別サンプルファイルに移行しました')
         
         print('\n=== 設定テスト完了 ===')
         return True
