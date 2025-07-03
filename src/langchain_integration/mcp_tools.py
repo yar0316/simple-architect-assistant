@@ -125,57 +125,131 @@ class LangChainMCPManager:
                     if not aws_services:
                         aws_services = ["EC2", "S3", "VPC"]
                     
-                    # コスト概算表を作成
-                    result += "## 📊 月額コスト概算表\n\n"
-                    result += "| AWSサービス | 構成詳細 | 月額概算(USD) | 年額概算(USD) | 最適化提案 |\n"
-                    result += "|------------|----------|---------------|---------------|------------|\n"
+                    # テンプレート処理関数を定義
+                    def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidance, cost_docs):
+                        """テンプレートベースでコスト分析レポートを生成"""
+                        import os
+                        
+                        # テンプレートファイルを読み込み
+                        template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "cost_analysis_template.md")
+                        try:
+                            with open(template_path, 'r', encoding='utf-8') as f:
+                                template = f.read()
+                        except FileNotFoundError:
+                            return "テンプレートファイルが見つかりません。"
+                        
+                        # サービス別コスト表を動的生成
+                        service_rows = []
+                        total_monthly = 0
+                        optimization_data = []
+                        
+                        for service in detected_services:
+                            if service in cost_estimates:
+                                estimate = cost_estimates[service]
+                                monthly_cost = estimate["cost"]
+                                total_monthly += monthly_cost
+                                yearly_cost = monthly_cost * 12
+                                
+                                # サービス行を追加
+                                service_rows.append(f"| {service} | {estimate['detail']} | ${monthly_cost} | ${yearly_cost} | {estimate['optimization']} |")
+                                
+                                # 最適化データを追加
+                                if estimate.get('reduction_rate', 0) > 0:
+                                    reduction_amount = monthly_cost * estimate['reduction_rate']
+                                    optimization_data.append({
+                                        'name': f"{service}最適化",
+                                        'current': estimate['current_state'],
+                                        'optimized': estimate['optimization'],
+                                        'savings': reduction_amount,
+                                        'percentage': int(estimate['reduction_rate'] * 100)
+                                    })
+                        
+                        service_cost_table = "\n".join(service_rows)
+                        total_yearly = total_monthly * 12
+                        
+                        # 最適化提案表を動的生成
+                        optimization_rows = []
+                        total_savings = 0
+                        
+                        for opt in optimization_data:
+                            optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.0f} | {opt['percentage']}% |")
+                            total_savings += opt['savings']
+                        
+                        optimization_table = "\n".join(optimization_rows)
+                        optimized_monthly = total_monthly - total_savings
+                        savings_percentage = int((total_savings / total_monthly * 100) if total_monthly > 0 else 0)
+                        
+                        # ガイダンス情報の処理
+                        guidance_text = cost_guidance if cost_guidance else "現在利用可能なガイダンスはありません。"
+                        docs_text = cost_docs.get('description', '料金情報は現在利用できません。') if cost_docs and cost_docs.get('description') != 'N/A' else "料金情報は現在利用できません。"
+                        
+                        # テンプレートに値を注入
+                        report = template.format(
+                            service_cost_table=service_cost_table,
+                            total_monthly=total_monthly,
+                            total_yearly=total_yearly,
+                            optimization_table=optimization_table,
+                            optimized_monthly=optimized_monthly,
+                            total_savings=total_savings,
+                            savings_percentage=savings_percentage,
+                            cost_guidance=guidance_text,
+                            cost_docs=docs_text
+                        )
+                        
+                        return report
                     
                     total_monthly = 0
                     cost_estimates = {
-                        "EC2": {"cost": 50, "detail": "t3.medium×2台", "optimization": "Reserved Instance (-30%)"},
-                        "S3": {"cost": 25, "detail": "100GB Standard", "optimization": "IA/Glacier移行 (-50%)"},
-                        "RDS": {"cost": 85, "detail": "db.t3.small Multi-AZ", "optimization": "Single-AZ検討 (-50%)"},
-                        "Lambda": {"cost": 15, "detail": "100万リクエスト/月", "optimization": "Provisioned Concurrency最適化"},
-                        "CloudFront": {"cost": 20, "detail": "1TB転送/月", "optimization": "キャッシュ設定最適化 (-20%)"},
-                        "VPC": {"cost": 10, "detail": "NAT Gateway×2", "optimization": "NAT Instance検討 (-70%)"}
+                        "EC2": {
+                            "cost": 50,
+                            "detail": "t3.medium×2台",
+                            "optimization": "Reserved Instance",
+                            "current_state": "オンデマンド",
+                            "reduction_rate": 0.30
+                        },
+                        "S3": {
+                            "cost": 25,
+                            "detail": "100GB Standard",
+                            "optimization": "IA + Glacier",
+                            "current_state": "Standard",
+                            "reduction_rate": 0.48
+                        },
+                        "RDS": {
+                            "cost": 85,
+                            "detail": "db.t3.small Multi-AZ",
+                            "optimization": "Single-AZ",
+                            "current_state": "Multi-AZ",
+                            "reduction_rate": 0.50
+                        },
+                        "Lambda": {
+                            "cost": 15,
+                            "detail": "100万リクエスト/月",
+                            "optimization": "Provisioned Concurrency最適化",
+                            "current_state": "オンデマンド実行",
+                            "reduction_rate": 0.20
+                        },
+                        "CloudFront": {
+                            "cost": 20,
+                            "detail": "1TB転送/月",
+                            "optimization": "キャッシュ設定最適化",
+                            "current_state": "標準設定",
+                            "reduction_rate": 0.20
+                        },
+                        "VPC": {
+                            "cost": 10,
+                            "detail": "NAT Gateway×2",
+                            "optimization": "NAT Instance",
+                            "current_state": "NAT Gateway",
+                            "reduction_rate": 0.70
+                        }
                     }
                     
-                    for service in aws_services:
-                        if service in cost_estimates:
-                            estimate = cost_estimates[service]
-                            monthly_cost = estimate["cost"]
-                            total_monthly += monthly_cost
-                            yearly_cost = monthly_cost * 12
-                            
-                            result += f"| {service} | {estimate['detail']} | ${monthly_cost} | ${yearly_cost} | {estimate['optimization']} |\n"
+                    # テンプレートベースでレポートを生成
+                    result = generate_cost_analysis_report(aws_services, cost_estimates, cost_guidance, cost_docs)
                     
-                    result += f"\n**合計月額: ${total_monthly} | 合計年額: ${total_monthly * 12}**\n\n"
-                    
-                    # コスト最適化提案表
-                    result += "## 💡 コスト最適化提案表\n\n"
-                    result += "| 最適化項目 | 現在 | 最適化後 | 月額削減 | 削減率 |\n"
-                    result += "|------------|------|----------|----------|--------|\n"
-                    result += "| EC2購入オプション | オンデマンド | Reserved Instance | $15 | 30% |\n"
-                    result += "| ストレージクラス | Standard | IA + Glacier | $12 | 48% |\n"
-                    result += "| データベース冗長性 | Multi-AZ | Single-AZ | $42 | 50% |\n"
-                    result += "| NAT設定 | NAT Gateway | NAT Instance | $25 | 70% |\n\n"
-                    
-                    result += f"**最適化後の月額総コスト: ${total_monthly - 94} (削減額: $94/月, {94/total_monthly*100:.0f}%削減)**\n\n"
-                    
-                    # ガイダンス情報を追加
-                    if cost_guidance:
-                        result += f"## 🎯 専門的ガイダンス\n\n{cost_guidance}\n\n"
-                    
-                    if cost_docs and cost_docs.get('description') != 'N/A':
-                        result += f"## 📋 料金情報\n\n{cost_docs.get('description', 'N/A')}\n\n"
-                    
-                    # 実装推奨事項
-                    result += "## ⚡ 実装推奨事項\n\n"
-                    result += "1. **コスト監視**: CloudWatch + Billing Alertsでコスト監視を設定\n"
-                    result += "2. **リソース管理**: AWS Cost Explorerで使用量を定期分析\n"
-                    result += "3. **自動化**: Auto Scalingでリソースの動的調整\n"
-                    result += "4. **タグ戦略**: コストセンター別のリソースタグ付け\n"
-                    result += "5. **定期レビュー**: 月次でのコスト最適化レビュー実施"
+                    # 結果のエラーハンドリング
+                    if not result:
+                        result = "コスト分析レポートの生成に失敗しました。"
                     
                     return result
                 except Exception as e:
