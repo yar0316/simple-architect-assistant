@@ -192,6 +192,3 @@ def handle_chat_input(bedrock_service, memory_manager=None):
         # メモリ管理にも追加
         if memory_manager and memory_manager.is_available():
             memory_manager.add_ai_message(full_response)
-
-# コスト分析関連の機能は削除されました。
-# エージェントモードのcost_analysisツールが自動的にコスト計算を実行します。
