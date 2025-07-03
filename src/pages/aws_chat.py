@@ -1,6 +1,10 @@
 import streamlit as st
 import os
 import sys
+import logging
+
+# ログレベル設定：INFOレベル以上のログを表示
+logging.basicConfig(level=logging.INFO)
 
 # 絶対パスでモジュールのパスを追加
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,9 +20,7 @@ try:
         display_langchain_stats,
         display_memory_stats,
         display_settings_tab,
-        add_message_to_history,
-        display_cost_analysis_button,
-        display_cost_analysis_ui
+        add_message_to_history
     )
     from services.bedrock_service import BedrockService
     from services.mcp_client import get_mcp_client
@@ -223,12 +225,6 @@ with tab_chat:
 
     # アクションボタン（チャット履歴がある場合のみ表示）
     if st.session_state.messages and len(st.session_state.messages) > 0:
-        # コスト分析ボタン
-        display_cost_analysis_button()
-        
-        # コスト分析UI表示
-        display_cost_analysis_ui(mcp_client)
-        
         # Terraform生成への連携ボタン
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:

@@ -1,13 +1,135 @@
 """LangChain MCP Adapters統合"""
 import asyncio
+import logging
+import os
+import re
 import streamlit as st
 from typing import List, Dict, Any, Optional
-import logging
 
 # Page type constants
 PAGE_TYPE_AWS_CHAT = "aws_chat"
 PAGE_TYPE_TERRAFORM_GENERATOR = "terraform_generator" 
 PAGE_TYPE_GENERAL = "general"
+
+# テンプレートキャッシュ（モジュールレベル）
+_COST_ANALYSIS_TEMPLATE = None
+
+def get_cost_analysis_template():
+    """コスト分析テンプレートをキャッシュして返す"""
+    global _COST_ANALYSIS_TEMPLATE
+    if _COST_ANALYSIS_TEMPLATE is None:
+        template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "cost_analysis_template.md")
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                _COST_ANALYSIS_TEMPLATE = f.read()
+        except FileNotFoundError:
+            _COST_ANALYSIS_TEMPLATE = "# エラー: テンプレートファイルが見つかりません\n\nコスト分析テンプレートの読み込みに失敗しました。"
+        except Exception as e:
+            _COST_ANALYSIS_TEMPLATE = f"# エラー: テンプレート読み込み失敗\n\n{str(e)}"
+    return _COST_ANALYSIS_TEMPLATE
+
+
+def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidance, cost_docs):
+    """テンプレートベースでコスト分析レポートを生成
+    
+    Args:
+        detected_services (list): 検出されたAWSサービス名のリスト (例: ["EC2", "S3", "RDS"])
+        cost_estimates (dict): サービス別コスト見積もり辞書。各サービスは以下の構造:
+            {
+                "cost": float,  # 月額コスト
+                "detail": str,  # 構成詳細
+                "optimization": str,  # 最適化提案
+                "current_state": str,  # 現在の状態
+                "reduction_rate": float  # 削減率 (0.0-1.0)
+            }
+        cost_guidance (str): MCP Core からのコスト最適化ガイダンス文字列
+        cost_docs (dict): AWS ドキュメントからの料金情報辞書 (description キーを含む)
+    
+    Returns:
+        str: 生成されたMarkdown形式のコスト分析レポート。以下を含む:
+            - サービス別月額・年額コスト表
+            - 最適化提案と削減効果表
+            - 専門的ガイダンス
+            - 実装推奨事項
+    """
+    
+    # キャッシュされたテンプレートを取得
+    template = get_cost_analysis_template()
+    
+    # エラーテンプレートの場合は早期リターン
+    if template.startswith("# エラー:"):
+        return template
+    
+    # サービス別コスト表を動的生成
+    service_rows = []
+    total_monthly = 0
+    optimization_data = []
+    
+    for service in detected_services:
+        if service in cost_estimates:
+            estimate = cost_estimates[service]
+            monthly_cost = estimate["cost"]
+            total_monthly += monthly_cost
+            yearly_cost = monthly_cost * 12
+            
+            # サービス行を追加
+            service_rows.append(f"| {service} | {estimate['detail']} | ${monthly_cost:.2f} | ${yearly_cost:.2f} | {estimate['optimization']} |")
+            
+            # 最適化データを追加
+            if estimate.get('reduction_rate', 0) > 0:
+                reduction_amount = monthly_cost * estimate['reduction_rate']
+                optimization_data.append({
+                    'name': f"{service}最適化",
+                    'current': estimate['current_state'],
+                    'optimized': estimate['optimization'],
+                    'savings': reduction_amount,
+                    'percentage': int(estimate['reduction_rate'] * 100)
+                })
+        else:
+            # 未知サービスの汎用対応
+            service_rows.append(f"| {service} | 詳細分析が必要です | 見積もり要 | 見積もり要 | 詳細な要件確認が必要 |")
+    
+    # 空テーブルのフォールバック処理
+    if not service_rows:
+        service_rows.append("| 該当サービスなし | 要件に基づくサービスを検出できませんでした | $0.00 | $0.00 | より具体的な要件をお聞かせください |")
+    
+    service_cost_table = "\n".join(service_rows)
+    total_yearly = total_monthly * 12
+    
+    # 最適化提案表を動的生成
+    optimization_rows = []
+    total_savings = 0
+    
+    for opt in optimization_data:
+        optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.2f} | {opt['percentage']}% |")
+        total_savings += opt['savings']
+    
+    # 最適化提案表の空テーブル対応
+    if not optimization_rows:
+        optimization_rows.append("| 最適化提案なし | 現在の構成 | 詳細分析後に提案 | $0.00 | 0% |")
+    
+    optimization_table = "\n".join(optimization_rows)
+    optimized_monthly = total_monthly - total_savings
+    savings_percentage = int((total_savings / total_monthly * 100) if total_monthly > 0 else 0)
+    
+    # ガイダンス情報の処理
+    guidance_text = cost_guidance if cost_guidance else "現在利用可能なガイダンスはありません。"
+    docs_text = cost_docs.get('description', '料金情報は現在利用できません。') if cost_docs and cost_docs.get('description') != 'N/A' else "料金情報は現在利用できません。"
+    
+    # テンプレートに値を注入
+    report = template.format(
+        service_cost_table=service_cost_table,
+        total_monthly=total_monthly,
+        total_yearly=total_yearly,
+        optimization_table=optimization_table,
+        optimized_monthly=optimized_monthly,
+        total_savings=total_savings,
+        savings_percentage=savings_percentage,
+        cost_guidance=guidance_text,
+        cost_docs=docs_text
+    )
+    
+    return report
 
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -97,28 +219,154 @@ class LangChainMCPManager:
             def cost_analysis(service_requirements: str) -> str:
                 """AWS構成のコスト分析を実行"""
                 try:
+                    logging.info(f"🔍 エージェントツール: コスト分析開始 - 要件: {service_requirements}")
+                    
+                    # 分析実行状況の詳細追跡
+                    analysis_steps = {
+                        "core_guidance": False,
+                        "aws_docs": False,
+                        "service_detection": False,
+                        "cost_estimates": {},
+                        "report_generation": False
+                    }
                     # Core MCPからコスト関連ガイダンスを取得
-                    cost_guidance = mcp_client_service.get_core_mcp_guidance(f"コスト最適化 {service_requirements}")
+                    try:
+                        cost_guidance = mcp_client_service.get_core_mcp_guidance(f"コスト最適化 {service_requirements}")
+                        analysis_steps["core_guidance"] = True
+                        logging.info(f"✅ Core MCP ガイダンス取得完了")
+                    except Exception as e:
+                        cost_guidance = None
+                        logging.warning(f"⚠️ Core MCP ガイダンス取得失敗: {e}")
                     
                     # AWS Documentationからコスト情報を検索
-                    cost_docs = mcp_client_service.get_aws_documentation(f"pricing cost calculator {service_requirements}")
+                    try:
+                        cost_docs = mcp_client_service.get_aws_documentation(f"pricing cost calculator {service_requirements}")
+                        analysis_steps["aws_docs"] = True
+                        logging.info(f"✅ AWS Documentation 取得完了")
+                    except Exception as e:
+                        cost_docs = None
+                        logging.warning(f"⚠️ AWS Documentation 取得失敗: {e}")
                     
-                    result = "💰 **コスト分析結果**\n\n"
+                    # 要件からAWSサービスを抽出してコスト概算表を作成
+                    service_patterns = {
+                        "EC2": r"(?i)ec2|インスタンス|仮想マシン|サーバー",
+                        "S3": r"(?i)s3|ストレージ|オブジェクト",
+                        "RDS": r"(?i)rds|データベース|mysql|postgres",
+                        "Lambda": r"(?i)lambda|サーバーレス|関数",
+                        "CloudFront": r"(?i)cloudfront|cdn|配信",
+                        "VPC": r"(?i)vpc|ネットワーク|プライベート"
+                    }
                     
-                    if cost_guidance:
-                        result += f"**コスト最適化ガイダンス:**\n{cost_guidance}\n\n"
+                    aws_services = []
+                    for service, pattern in service_patterns.items():
+                        if re.search(pattern, service_requirements):
+                            aws_services.append(service)
                     
-                    if cost_docs:
-                        result += f"**料金情報:**\n{cost_docs.get('description', 'N/A')}\n\n"
+                    # デフォルトでよく使われるサービスを追加
+                    if not aws_services:
+                        aws_services = ["EC2", "S3", "VPC"]
                     
-                    result += "**推奨事項:**\n"
-                    result += "- リザーブドインスタンスでの長期利用割引検討\n"
-                    result += "- Spot インスタンスでの開発環境コスト削減\n"
-                    result += "- CloudWatch でのリソース使用率監視\n"
-                    result += "- Auto Scaling でのリソース最適化"
+                    analysis_steps["service_detection"] = True
+                    logging.info(f"✅ AWSサービス検出完了: {aws_services}")
+                    
+                    # MCPサーバーから動的にコスト見積もりを取得
+                    cost_estimates = {}
+                    
+                    # 各サービスについてMCPクライアントから見積もりを取得
+                    successful_estimates = 0
+                    failed_estimates = 0
+                    
+                    for service in aws_services:
+                        try:
+                            logging.info(f"🔄 エージェントツール: {service}のコスト分析開始")
+                            
+                            # サービス構成情報を準備
+                            service_config = {
+                                "service_name": service,
+                                "region": "us-east-1",  # デフォルトリージョン
+                                "usage_details": {}
+                            }
+                            
+                            # 要件文字列からインスタンスタイプを推定
+                            if service in ["EC2", "RDS"]:
+                                if "small" in service_requirements.lower():
+                                    service_config["instance_type"] = "t3.small" if service == "EC2" else "db.t3.small"
+                                elif "large" in service_requirements.lower():
+                                    service_config["instance_type"] = "t3.large" if service == "EC2" else "db.t3.large"
+                                else:
+                                    service_config["instance_type"] = "t3.medium" if service == "EC2" else "db.t3.small"
+                            
+                            # MCPクライアントからコスト見積もりを取得
+                            logging.info(f"📞 MCPクライアント呼び出し: {service} -> {service_config}")
+                            estimate = mcp_client_service.get_cost_estimation(service_config)
+                            
+                            if estimate:
+                                cost = estimate.get('cost', 'N/A')
+                                source = estimate.get('current_state', 'unknown')
+                                logging.info(f"✅ MCPクライアント成功: {service} -> ${cost}/月 ({source})")
+                                cost_estimates[service] = estimate
+                                analysis_steps["cost_estimates"][service] = "success"
+                                successful_estimates += 1
+                            else:
+                                logging.warning(f"❌ MCPクライアント失敗: {service} -> フォールバック使用")
+                                # フォールバック: 基本的な見積もり
+                                cost_estimates[service] = {
+                                    "cost": 30,
+                                    "detail": f"{service} 基本構成",
+                                    "optimization": "詳細分析が必要",
+                                    "current_state": "デフォルト",
+                                    "reduction_rate": 0.15
+                                }
+                                analysis_steps["cost_estimates"][service] = "fallback"
+                                failed_estimates += 1
+                                
+                        except Exception as service_error:
+                            logging.error(f"🚨 エージェントツール例外: {service} -> {service_error}")
+                            # 個別サービスエラーでも処理を継続
+                            cost_estimates[service] = {
+                                "cost": 25,
+                                "detail": f"{service} 見積もり要",
+                                "optimization": "詳細な要件確認が必要",
+                                "current_state": "不明",
+                                "reduction_rate": 0.10
+                            }
+                            analysis_steps["cost_estimates"][service] = "error"
+                            failed_estimates += 1
+                    
+                    # コスト見積もりの統計ログ
+                    logging.info(f"📊 コスト見積もり完了: 成功={successful_estimates}, 失敗={failed_estimates}, 総数={len(aws_services)}")
+                    
+                    # テンプレートベースでレポートを生成
+                    try:
+                        result = generate_cost_analysis_report(aws_services, cost_estimates, cost_guidance, cost_docs)
+                        analysis_steps["report_generation"] = True
+                        logging.info(f"✅ コスト分析レポート生成完了")
+                    except Exception as report_error:
+                        logging.error(f"❌ レポート生成エラー: {report_error}")
+                        result = "コスト分析レポートの生成に失敗しました。"
+                    
+                    # 分析実行統計の最終ログ
+                    completed_steps = sum(1 for step, status in analysis_steps.items() 
+                                        if step != "cost_estimates" and status)
+                    successful_services = sum(1 for status in analysis_steps["cost_estimates"].values() 
+                                            if status == "success")
+                    
+                    print(f"   🎯 コスト分析完了統計:")
+                    print(f"     - 完了ステップ: {completed_steps}/4")
+                    print(f"     - 成功したサービス: {successful_services}/{len(aws_services)}")
+                    print(f"     - 最終レポート: {'生成成功' if result and not result.startswith('コスト分析レポートの生成に失敗') else '生成失敗'}")
+                    logging.info(f"🎯 コスト分析完了統計:")
+                    logging.info(f"   - 完了ステップ: {completed_steps}/4")
+                    logging.info(f"   - 成功したサービス: {successful_services}/{len(aws_services)}")
+                    logging.info(f"   - 最終レポート: {'生成成功' if result and not result.startswith('コスト分析レポートの生成に失敗') else '生成失敗'}")
+                    
+                    # 結果のエラーハンドリング
+                    if not result:
+                        result = "コスト分析レポートの生成に失敗しました。"
                     
                     return result
                 except Exception as e:
+                    logging.error(f"🚨 コスト分析ツール全体エラー: {e}")
                     return f"コスト分析エラー: {str(e)}。基本的なコスト最適化手法を検討してください。"
             
             # Terraformコード生成ツール（terraform_generatorページ特化）

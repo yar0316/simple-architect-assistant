@@ -72,17 +72,25 @@ class StreamlitAgentCallbackHandler(BaseCallbackHandler):
     
     def on_tool_end(self, output, **kwargs):
         """ツール実行が完了した時に呼ばれる"""
-        if self.current_step_container:
-            self.current_step_container.success("✅ 実行完了")
-            
-        # 最新ステップに結果を追加
-        if self.steps_history:
-            self.steps_history[-1]["output"] = str(output)[:500] + "..." if len(str(output)) > 500 else str(output)
+        try:
+            if self.current_step_container:
+                self.current_step_container.success("✅ 実行完了")
+                
+            # 最新ステップに結果を追加
+            if self.steps_history:
+                self.steps_history[-1]["output"] = str(output)[:500] + "..." if len(str(output)) > 500 else str(output)
+        except Exception as e:
+            # ScriptRunContextエラーを無視
+            pass
     
     def on_tool_error(self, error, **kwargs):
         """ツール実行でエラーが発生した時に呼ばれる"""
-        if self.current_step_container:
-            self.current_step_container.error(f"❌ エラー: {error}")
+        try:
+            if self.current_step_container:
+                self.current_step_container.error(f"❌ エラー: {error}")
+        except Exception as e:
+            # ScriptRunContextエラーを無視
+            pass
 
 
 class AWSAgentExecutor:
