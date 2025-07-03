@@ -1,6 +1,10 @@
 import streamlit as st
 import os
 import sys
+import logging
+
+# ログレベル設定：INFOレベル以上のログを表示
+logging.basicConfig(level=logging.INFO)
 
 # 絶対パスでモジュールのパスを追加
 current_dir = os.path.dirname(os.path.abspath(__file__))

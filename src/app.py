@@ -1,4 +1,8 @@
 import streamlit as st
+import logging
+
+# ログレベル設定：INFOレベル以上のログを表示
+logging.basicConfig(level=logging.INFO)
 
 # ページ設定
 st.set_page_config(

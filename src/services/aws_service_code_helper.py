@@ -26,6 +26,7 @@ class AWSServiceCodeHelper:
         self.cache_duration = cache_duration
         self.last_updated = None
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)  # INFOレベル以上のログを表示
         self.logger.info("AWSServiceCodeHelper初期化開始")
         self._load_service_codes()
         self.logger.info(f"AWSServiceCodeHelper初期化完了: {len(self.service_codes) if self.service_codes else 0}個のサービスコード")
@@ -62,7 +63,7 @@ class AWSServiceCodeHelper:
             
             # APIが成功したが0個の場合もフォールバックを使用
             if len(self.service_codes) == 0:
-                self.logger.warning("AWS API成功だが0個のサービスコード、フォールバックに切り替え")
+                self.logger.warning("📼 [サービスコードヘルパー] AWS API成功だが0個のサービスコード、フォールバックに切り替え")
                 self._load_fallback_codes()
                     
         except Exception as e:

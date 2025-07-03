@@ -22,9 +22,10 @@ import asyncio
 # 新しいAWSServiceCodeHelperをインポート
 try:
     from .aws_service_code_helper import get_service_code_helper
-    print("🚨 [DEBUG] AWSServiceCodeHelper インポート成功")
+    # インポート成功は通常のINFOレベルでログ出力（モジュール初期化時のため、ここではloggingモジュール使用）
+    logging.info("💼 [AWSServiceCodeHelper] インポート成功")
 except ImportError as import_error:
-    print(f"🚨 [DEBUG] AWSServiceCodeHelper インポート失敗: {import_error}")
+    logging.warning(f"💼 [AWSServiceCodeHelper] インポート失敗: {import_error}")
     
     # フォールバック関数を定義
     def get_service_code_helper():
@@ -189,6 +190,7 @@ class MCPClientService:
             config_path: MCP設定ファイルのパス（デフォルト: config/mcp_config.json）
         """
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)  # INFOレベル以上のログを表示
         self.platform = platform.system().lower()
         self.config_path = config_path or self._get_default_config_path()
         self.mcp_client = None
@@ -426,7 +428,7 @@ class MCPClientService:
         Returns:
             ツールの実行結果、またはエラー時はNone
         """
-        self.logger.info(f"🔄 MCPツール呼び出し開始: サーバー='{server_name}', ツール='{tool_name}'")
+        self.logger.info(f"🔄 [MCP] ツール呼び出し開始: サーバー='{server_name}', ツール='{tool_name}'")
         self.logger.debug(f"   - パラメータ: {kwargs}")
         
         # MCPクライアントの初期化状態確認
@@ -447,7 +449,7 @@ class MCPClientService:
             
         try:
             # MCPクライアントからツールを取得
-            self.logger.debug(f"🔍 MCPクライアントからツール一覧取得中...")
+            self.logger.debug(f"   🔍 MCPクライアントからツール一覧取得中...")
             tools = await self.mcp_client.get_tools()
             self.logger.info(f"   - 取得されたツール数: {len(tools)}")
             
@@ -472,7 +474,7 @@ class MCPClientService:
                     # サーバー名が一致するツールを優先
                     if hasattr(tool, 'server_name') and tool.server_name == server_name:
                         target_tool = tool
-                        self.logger.info(f"✅ サーバー固有ツール発見: {server_name}.{tool_name}")
+                        self.logger.info(f"   ✅ サーバー固有ツール発見: {server_name}.{tool_name}")
                         break
                     # サーバー名情報がない場合は、とりあえず候補として保持
                     elif not target_tool:
@@ -493,15 +495,15 @@ class MCPClientService:
                 return self._handle_fallback_tool_call(server_name, tool_name, **kwargs)
             
             # ツールを実行
-            self.logger.info(f"🚀 MCPツール実行: {tool_name}")
+            self.logger.info(f"   🚀 MCPツール実行: {tool_name}")
             result = await target_tool.ainvoke(kwargs)
             
             if result:
-                self.logger.info(f"✅ MCPツール実行成功: {tool_name}")
+                self.logger.info(f"   ✅ MCPツール実行成功: {tool_name}")
                 self.logger.debug(f"   - 結果タイプ: {type(result)}")
                 self.logger.debug(f"   - 結果サイズ: {len(str(result))} 文字")
             else:
-                self.logger.warning(f"❌ MCPツール実行結果が空: {tool_name}")
+                self.logger.warning(f"   ❌ MCPツール実行結果が空: {tool_name}")
             
             return result
             
@@ -786,7 +788,7 @@ resource "aws_iam_role" "lambda_role" {
             # find_service_codeメソッド呼び出し
             try:
                 service_code = service_code_helper.find_service_code(service_name_input)
-                self.logger.info(f"✅ サービス名変換: '{service_name_input}' → '{service_code}'")
+                self.logger.info(f"💼 [サービスコード変換] '{service_name_input}' → '{service_code}'")
             except Exception as find_error:
                 self.logger.error(f"find_service_code呼び出し例外: {find_error}")
                 service_code = None
@@ -832,70 +834,70 @@ resource "aws_iam_role" "lambda_role" {
             
             # 最初にAPI経由で価格情報を取得
             try:
-                self.logger.info(f"🔄 Cost Analysis MCP Server API呼び出し開始")
+                self.logger.info(f"🔄 [Cost Analysis MCP] API呼び出し開始")
                 self.logger.info(f"   - サーバー: awslabs.cost-analysis-mcp-server")
                 self.logger.info(f"   - ツール: get_pricing_from_api")
-                self.logger.info(f"   - パラメータ: service_code='{service_code}', region='{region}'")
+                self.logger.debug(f"   - パラメータ: service_code='{service_code}', region='{region}'")
                 
                 mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_api", 
                                               service_code=service_code, region=region)
                 
                 if mcp_result:
-                    self.logger.info(f"✅ Cost Analysis MCP API呼び出し成功")
+                    self.logger.info(f"   ✅ Cost Analysis MCP API呼び出し成功")
                     self.logger.debug(f"   - 結果タイプ: {type(mcp_result)}")
                     self.logger.debug(f"   - 結果サイズ: {len(str(mcp_result))} 文字")
                 else:
-                    self.logger.warning(f"❌ Cost Analysis MCP API呼び出し失敗: 結果がNone")
+                    self.logger.warning(f"   ❌ Cost Analysis MCP API呼び出し失敗: 結果がNone")
             except Exception as api_error:
                 self.logger.warning(f"❌ Cost Analysis MCP API呼び出し例外: {api_error}")
                 
                 # API失敗時はWeb検索にフォールバック
                 try:
-                    self.logger.info(f"🔄 Cost Analysis MCP Server Web検索にフォールバック")
+                    self.logger.info(f"   🔄 Cost Analysis MCP Server Web検索にフォールバック")
                     self.logger.info(f"   - サーバー: awslabs.cost-analysis-mcp-server")
                     self.logger.info(f"   - ツール: get_pricing_from_web")
-                    self.logger.info(f"   - パラメータ: query='{query}'")
+                    self.logger.debug(f"   - パラメータ: query='{query}'")
                     
                     mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_web", query=query)
                     
                     if mcp_result:
-                        self.logger.info(f"✅ Cost Analysis MCP Web検索成功")
+                        self.logger.info(f"   ✅ Cost Analysis MCP Web検索成功")
                         self.logger.debug(f"   - 結果タイプ: {type(mcp_result)}")
                         self.logger.debug(f"   - 結果サイズ: {len(str(mcp_result))} 文字")
                     else:
-                        self.logger.warning(f"❌ Cost Analysis MCP Web検索失敗: 結果がNone")
+                        self.logger.warning(f"   ❌ Cost Analysis MCP Web検索失敗: 結果がNone")
                         
                 except Exception as web_error:
                     self.logger.error(f"❌ Cost Analysis MCP Web検索例外: {web_error}")
                     mcp_result = None
             
             if mcp_result:
-                self.logger.info(f"✅ Cost Analysis MCP Server成功、結果変換中")
+                self.logger.info(f"   ✅ Cost Analysis MCP Server成功、結果変換中")
                 # MCPサーバーの結果を既存の形式に変換
                 result = self._convert_mcp_result_to_standard_format(mcp_result, service_code, instance_type, region)
                 
                 if result:
-                    self.logger.info(f"✅ Cost Analysis結果変換成功: {result['cost']}USD/月")
+                    self.logger.info(f"   ✅ Cost Analysis結果変換成功: {result['cost']}USD/月")
                     # 結果をキャッシュに保存（コスト見積もりは短期間有効）
                     self.request_cache.set("get_cost_estimation", result, 300, cache_key_data)  # 5分キャッシュ
                     return result
                 else:
-                    self.logger.warning(f"❌ Cost Analysis結果変換失敗")
+                    self.logger.warning(f"   ❌ Cost Analysis結果変換失敗")
             
             # Cost Analysis MCPが失敗した場合、AWS Documentation MCPから価格情報を取得
-            self.logger.info(f"🔄 AWS Documentation MCPにフォールバック: {service_code}")
+            self.logger.info(f"   🔄 AWS Documentation MCPにフォールバック: {service_code}")
             doc_result = self._get_pricing_from_aws_documentation(service_code, region, instance_type, display_name)
             
             if doc_result:
-                self.logger.info(f"✅ AWS Documentation MCP成功: {doc_result['cost']}USD/月")
+                self.logger.info(f"   ✅ AWS Documentation MCP成功: {doc_result['cost']}USD/月")
                 # AWS Documentation MCPからの結果をキャッシュに保存
                 self.request_cache.set("get_cost_estimation", doc_result, 300, cache_key_data)
                 return doc_result
             else:
                 # AWS Documentation MCPも失敗した場合、最終フォールバック
-                self.logger.info(f"🔄 最終フォールバック（静的計算）使用: {service_code}")
+                self.logger.info(f"   🔄 最終フォールバック（静的計算）使用: {service_code}")
                 fallback_result = self._calculate_fallback_cost_estimate(service_code, region, instance_type)
-                self.logger.info(f"✅ 最終フォールバック成功: {fallback_result['cost']}USD/月")
+                self.logger.info(f"   ✅ 最終フォールバック成功: {fallback_result['cost']}USD/月")
                 return fallback_result
                 
         except Exception as e:

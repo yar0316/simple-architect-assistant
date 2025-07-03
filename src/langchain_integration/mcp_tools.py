@@ -351,6 +351,10 @@ class LangChainMCPManager:
                     successful_services = sum(1 for status in analysis_steps["cost_estimates"].values() 
                                             if status == "success")
                     
+                    print(f"   🎯 コスト分析完了統計:")
+                    print(f"     - 完了ステップ: {completed_steps}/4")
+                    print(f"     - 成功したサービス: {successful_services}/{len(aws_services)}")
+                    print(f"     - 最終レポート: {'生成成功' if result and not result.startswith('コスト分析レポートの生成に失敗') else '生成失敗'}")
                     logging.info(f"🎯 コスト分析完了統計:")
                     logging.info(f"   - 完了ステップ: {completed_steps}/4")
                     logging.info(f"   - 成功したサービス: {successful_services}/{len(aws_services)}")
