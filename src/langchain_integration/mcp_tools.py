@@ -214,7 +214,6 @@ class LangChainMCPManager:
                         
                         return report
                     
-                    total_monthly = 0
                     cost_estimates = {
                         "EC2": {
                             "cost": 50,
