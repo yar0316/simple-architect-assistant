@@ -3,11 +3,29 @@ import asyncio
 import streamlit as st
 from typing import List, Dict, Any, Optional
 import logging
+import os
 
 # Page type constants
 PAGE_TYPE_AWS_CHAT = "aws_chat"
 PAGE_TYPE_TERRAFORM_GENERATOR = "terraform_generator" 
 PAGE_TYPE_GENERAL = "general"
+
+# テンプレートキャッシュ（モジュールレベル）
+_COST_ANALYSIS_TEMPLATE = None
+
+def get_cost_analysis_template():
+    """コスト分析テンプレートをキャッシュして返す"""
+    global _COST_ANALYSIS_TEMPLATE
+    if _COST_ANALYSIS_TEMPLATE is None:
+        template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "cost_analysis_template.md")
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                _COST_ANALYSIS_TEMPLATE = f.read()
+        except FileNotFoundError:
+            _COST_ANALYSIS_TEMPLATE = "# エラー: テンプレートファイルが見つかりません\n\nコスト分析テンプレートの読み込みに失敗しました。"
+        except Exception as e:
+            _COST_ANALYSIS_TEMPLATE = f"# エラー: テンプレート読み込み失敗\n\n{str(e)}"
+    return _COST_ANALYSIS_TEMPLATE
 
 try:
     from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -128,15 +146,13 @@ class LangChainMCPManager:
                     # テンプレート処理関数を定義
                     def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidance, cost_docs):
                         """テンプレートベースでコスト分析レポートを生成"""
-                        import os
                         
-                        # テンプレートファイルを読み込み
-                        template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "cost_analysis_template.md")
-                        try:
-                            with open(template_path, 'r', encoding='utf-8') as f:
-                                template = f.read()
-                        except FileNotFoundError:
-                            return "テンプレートファイルが見つかりません。"
+                        # キャッシュされたテンプレートを取得
+                        template = get_cost_analysis_template()
+                        
+                        # エラーテンプレートの場合は早期リターン
+                        if template.startswith("# エラー:"):
+                            return template
                         
                         # サービス別コスト表を動的生成
                         service_rows = []
