@@ -52,7 +52,7 @@ def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidan
             yearly_cost = monthly_cost * 12
             
             # サービス行を追加
-            service_rows.append(f"| {service} | {estimate['detail']} | ${monthly_cost} | ${yearly_cost} | {estimate['optimization']} |")
+            service_rows.append(f"| {service} | {estimate['detail']} | ${monthly_cost:.2f} | ${yearly_cost:.2f} | {estimate['optimization']} |")
             
             # 最適化データを追加
             if estimate.get('reduction_rate', 0) > 0:
@@ -73,7 +73,7 @@ def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidan
     total_savings = 0
     
     for opt in optimization_data:
-        optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.0f} | {opt['percentage']}% |")
+        optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.2f} | {opt['percentage']}% |")
         total_savings += opt['savings']
     
     optimization_table = "\n".join(optimization_rows)
