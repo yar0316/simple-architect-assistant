@@ -30,7 +30,28 @@ def get_cost_analysis_template():
 
 
 def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidance, cost_docs):
-    """テンプレートベースでコスト分析レポートを生成"""
+    """テンプレートベースでコスト分析レポートを生成
+    
+    Args:
+        detected_services (list): 検出されたAWSサービス名のリスト (例: ["EC2", "S3", "RDS"])
+        cost_estimates (dict): サービス別コスト見積もり辞書。各サービスは以下の構造:
+            {
+                "cost": float,  # 月額コスト
+                "detail": str,  # 構成詳細
+                "optimization": str,  # 最適化提案
+                "current_state": str,  # 現在の状態
+                "reduction_rate": float  # 削減率 (0.0-1.0)
+            }
+        cost_guidance (str): MCP Core からのコスト最適化ガイダンス文字列
+        cost_docs (dict): AWS ドキュメントからの料金情報辞書 (description キーを含む)
+    
+    Returns:
+        str: 生成されたMarkdown形式のコスト分析レポート。以下を含む:
+            - サービス別月額・年額コスト表
+            - 最適化提案と削減効果表
+            - 専門的ガイダンス
+            - 実装推奨事項
+    """
     
     # キャッシュされたテンプレートを取得
     template = get_cost_analysis_template()
