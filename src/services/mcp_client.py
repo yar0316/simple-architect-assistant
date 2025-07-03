@@ -616,7 +616,7 @@ resource "aws_iam_role" "lambda_role" {
             # 最初にAPI経由で価格情報を取得
             try:
                 mcp_result = self.call_mcp_tool("awslabs.cost-analysis-mcp-server", "get_pricing_from_api", 
-                                              service_name=service_name, region=region, instance_type=instance_type)
+                                              service_code=service_name, region=region)
             except Exception as api_error:
                 self.logger.warning(f"API価格取得失敗、Web検索にフォールバック: {api_error}")
                 
