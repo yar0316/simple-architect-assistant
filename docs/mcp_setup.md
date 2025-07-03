@@ -40,11 +40,19 @@ export AWS_DEFAULT_REGION=ap-northeast-1
 
 ## MCP設定ファイル
 
-MCPサーバーの設定は `config/mcp_config.json` で管理されています。
+MCPサーバーの設定は各OS向けのサンプルファイルを用意しています。
 
-### デフォルト設定（Windows対応）
+### OS別設定ファイル
 
-Windows環境での動作を優先し、以下の設定をデフォルトとしています：
+各OS環境に最適化された設定ファイルが用意されています：
+
+- **Windows**: `config/mcp_config_windows.json`
+- **Mac**: `config/mcp_config_mac.json`
+- **Linux**: `config/mcp_config_linux.json`
+
+使用する環境に応じて適切なファイルを `config/mcp_config.json` にコピーしてください。
+
+### Windows設定の例
 
 ```json
 {
@@ -88,32 +96,42 @@ Windows環境での動作を優先し、以下の設定をデフォルトとし�
 
 **重要**: Windows環境では `--from` オプションと `.exe` 拡張子が必要です。これは[こちらの記事](https://qiita.com/revsystem/items/911999b174dc5f3cf29d)で説明されているWindows固有の要件です。
 
-### プラットフォーム固有設定
+### Mac/Linux設定の例
 
-Mac/Linux環境では、より簡潔な設定を使用できます。`platform_overrides` セクションで自動的に適用されます：
+Mac/Linux環境では、より簡潔な設定を使用できます：
 
 ```json
 {
-  "platform_overrides": {
-    "darwin": {
-      "mcpServers": {
-        "awslabs.core-mcp-server": {
-          "command": "uvx",
-          "args": ["awslabs.core-mcp-server@latest"]
-        }
-      }
-    },
-    "linux": {
-      "mcpServers": {
-        "awslabs.core-mcp-server": {
-          "command": "uvx", 
-          "args": ["awslabs.core-mcp-server@latest"]
-        }
-      }
+  "mcpServers": {
+    "awslabs.core-mcp-server": {
+      "command": "uvx",
+      "args": ["awslabs.core-mcp-server@latest"],
+      "env": {"FASTMCP_LOG_LEVEL": "ERROR"},
+      "autoApprove": [],
+      "disabled": false
     }
   }
 }
 ```
+
+### 初期設定手順
+
+1. **環境に応じたファイルをコピー:**
+   ```bash
+   # Windows の場合
+   cp config/mcp_config_windows.json config/mcp_config.json
+   
+   # Mac の場合  
+   cp config/mcp_config_mac.json config/mcp_config.json
+   
+   # Linux の場合
+   cp config/mcp_config_linux.json config/mcp_config.json
+   ```
+
+2. **必要に応じて設定をカスタマイズ:**
+   - AWS プロファイル名の変更
+   - ログレベルの調整
+   - 不要なサーバーの無効化
 
 ## 設定のカスタマイズ
 
