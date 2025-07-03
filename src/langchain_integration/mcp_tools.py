@@ -85,6 +85,13 @@ def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidan
                     'savings': reduction_amount,
                     'percentage': int(estimate['reduction_rate'] * 100)
                 })
+        else:
+            # 未知サービスの汎用対応
+            service_rows.append(f"| {service} | 詳細分析が必要です | 見積もり要 | 見積もり要 | 詳細な要件確認が必要 |")
+    
+    # 空テーブルのフォールバック処理
+    if not service_rows:
+        service_rows.append("| 該当サービスなし | 要件に基づくサービスを検出できませんでした | $0.00 | $0.00 | より具体的な要件をお聞かせください |")
     
     service_cost_table = "\n".join(service_rows)
     total_yearly = total_monthly * 12
@@ -96,6 +103,10 @@ def generate_cost_analysis_report(detected_services, cost_estimates, cost_guidan
     for opt in optimization_data:
         optimization_rows.append(f"| {opt['name']} | {opt['current']} | {opt['optimized']} | ${opt['savings']:.2f} | {opt['percentage']}% |")
         total_savings += opt['savings']
+    
+    # 最適化提案表の空テーブル対応
+    if not optimization_rows:
+        optimization_rows.append("| 最適化提案なし | 現在の構成 | 詳細分析後に提案 | $0.00 | 0% |")
     
     optimization_table = "\n".join(optimization_rows)
     optimized_monthly = total_monthly - total_savings
