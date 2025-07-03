@@ -225,8 +225,6 @@ class LangChainMCPManager:
                     # AWS Documentationからコスト情報を検索
                     cost_docs = mcp_client_service.get_aws_documentation(f"pricing cost calculator {service_requirements}")
                     
-                    result = "💰 **コスト分析結果**\n\n"
-                    
                     # 要件からAWSサービスを抽出してコスト概算表を作成
                     aws_services = []
                     service_patterns = {
