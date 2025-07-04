@@ -384,8 +384,14 @@ with col1:
                                     
                                     manual_mcp_manager = st.session_state.manual_langchain_mcp_manager
                                     
-                                    # Core MCPからガイダンスを取得
-                                    core_guidance = mcp_client.get_core_mcp_guidance(context_info)
+                                    # LangChainMCPManagerのaws_guidanceツールを使用してCore MCPガイダンスを取得
+                                    core_guidance = None
+                                    guidance_tool = manual_mcp_manager.get_tool_by_name("aws_guidance")
+                                    if guidance_tool:
+                                        core_guidance = guidance_tool.func(f"Terraformコード生成ガイダンス {context_info}")
+                                    else:
+                                        # フォールバック: 従来のMCPクライアント呼び出し
+                                        core_guidance = mcp_client.get_core_mcp_guidance(context_info)
                                     
                                     # LangChainMCPManagerのterraform_code_generatorツールを使用
                                     terraform_code = None
@@ -397,8 +403,17 @@ with col1:
                                         # フォールバック: 従来のMCPクライアント呼び出し
                                         terraform_code = mcp_client.generate_terraform_code(context_info)
                                     
+                                    # AWS Documentation検索も統一
+                                    aws_docs = None
+                                    docs_tool = manual_mcp_manager.get_tool_by_name("aws_documentation_search")
+                                    if docs_tool:
+                                        aws_docs = docs_tool.func(f"Terraform {context_info}")
+                                    else:
+                                        # フォールバック: 従来のMCPクライアント呼び出し
+                                        aws_docs = mcp_client.get_aws_documentation(f"Terraform {context_info}")
+                                    
                                     # プロンプトを拡張
-                                    if core_guidance or terraform_code:
+                                    if core_guidance or terraform_code or aws_docs:
                                         enhanced_context = f"""ユーザーリクエスト: {context_info}
 
 【MCP統合情報】"""
@@ -406,8 +421,14 @@ with col1:
                                         if core_guidance:
                                             enhanced_context += f"""
 
-■ Core MCPガイダンス:
+■ AWS構成ガイダンス:
 {core_guidance}"""
+                                        
+                                        if aws_docs:
+                                            enhanced_context += f"""
+
+■ AWS公式ドキュメント情報:
+{aws_docs}"""
                                         
                                         if terraform_code:
                                             enhanced_context += f"""
