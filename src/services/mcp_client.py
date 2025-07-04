@@ -641,90 +641,71 @@ class MCPClientService:
         if cached_result is not None:
             return cached_result
         
-        # MCP統合が完全に動作するまでは、基本的なテンプレートを返す
         try:
-            # 将来的にはMCPサーバーから動的に取得
-            # result = self.call_mcp_tool("awslabs.terraform-mcp-server", "generate_terraform", requirements=requirements)
+            self.logger.info(f"🏗️ Terraform MCPサーバーからコード生成開始: {requirements[:100]}...")
             
-            # 現在は基本的なTerraformテンプレートを提供
-            result = None
-            if "vpc" in requirements.lower():
-                result = '''
-# VPC基本構成テンプレート
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_hostnames = true
-  enable_dns_support   = true
-  
-  tags = {
-    Name = "main-vpc"
-  }
-}
-
-resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = data.aws_availability_zones.available.names[0]
-  map_public_ip_on_launch = true
-  
-  tags = {
-    Name = "public-subnet"
-  }
-}
-
-resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
-  
-  tags = {
-    Name = "main-igw"
-  }
-}
-'''
-            elif "lambda" in requirements.lower():
-                result = '''
-# Lambda基本構成テンプレート
-resource "aws_lambda_function" "main" {
-  filename         = "lambda.zip"
-  function_name    = "main-function"
-  role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  source_code_hash = filebase64sha256("lambda.zip")
-  runtime         = "python3.9"
-  
-  tags = {
-    Name = "main-lambda"
-  }
-}
-
-resource "aws_iam_role" "lambda_role" {
-  name = "lambda-execution-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-}
-'''
+            # まず実際のMCPサーバーを呼び出し
+            mcp_result = None
+            try:
+                self.logger.info(f"🔄 [Terraform MCP] 実際のMCPサーバー呼び出し開始")
+                self.logger.info(f"   - サーバー: awslabs.terraform-mcp-server")
+                self.logger.info(f"   - ツール: generate_terraform")
+                self.logger.debug(f"   - パラメータ: requirements='{requirements[:200]}...'")
+                
+                mcp_result = self.call_mcp_tool("awslabs.terraform-mcp-server", "generate_terraform", requirements=requirements)
+                
+                if mcp_result:
+                    self.logger.info(f"   ✅ Terraform MCP Server呼び出し成功")
+                    self.logger.debug(f"   - 結果タイプ: {type(mcp_result)}")
+                    self.logger.debug(f"   - 結果サイズ: {len(str(mcp_result))} 文字")
+                    
+                    # MCPサーバーからの結果を処理
+                    terraform_code = self._extract_terraform_code_from_mcp_result(mcp_result)
+                    
+                    if terraform_code:
+                        self.logger.info(f"   ✅ Terraformコード抽出成功: {len(terraform_code)} 文字")
+                        # 結果をキャッシュに保存（Terraformコードは短期間有効）
+                        self.request_cache.set("generate_terraform_code", terraform_code, 180, requirements)  # 3分キャッシュ
+                        return terraform_code
+                    else:
+                        self.logger.warning(f"   ❌ Terraformコード抽出失敗")
+                else:
+                    self.logger.warning(f"   ❌ Terraform MCP Server呼び出し失敗: 結果がNone")
+                    
+            except Exception as mcp_error:
+                self.logger.warning(f"❌ Terraform MCP Server呼び出し例外: {mcp_error}")
+            
+            # MCPサーバーが失敗した場合、フォールバック処理を実行
+            self.logger.info(f"🔄 Terraform MCPフォールバック処理実行")
+            fallback_result = self._handle_fallback_tool_call("awslabs.terraform-mcp-server", "generate_terraform", requirements=requirements)
+            
+            if fallback_result and isinstance(fallback_result, dict):
+                terraform_code = fallback_result.get("terraform_code", "")
+                if terraform_code:
+                    self.logger.info(f"✅ Terraformフォールバック成功: {len(terraform_code)} 文字")
+                    # フォールバック結果もキャッシュに保存（短期間）
+                    self.request_cache.set("generate_terraform_code", terraform_code, 120, requirements)  # 2分キャッシュ
+                    return terraform_code
+                else:
+                    self.logger.warning(f"❌ Terraformフォールバック結果が空")
             else:
-                result = "# 詳細な要件を指定してください。MCP統合により、より具体的なTerraformコードが生成されます。"
+                self.logger.warning(f"❌ Terraformフォールバック失敗")
             
-            # 結果をキャッシュに保存（Terraformコードは短期間有効）
-            if result:
-                self.request_cache.set("generate_terraform_code", result, 180, requirements)  # 3分キャッシュ
+            # 最終フォールバック：基本テンプレート
+            self.logger.info(f"🔄 最終フォールバック（基本テンプレート）使用")
+            basic_template = self._get_basic_terraform_template(requirements)
             
-            return result
+            if basic_template:
+                self.logger.info(f"✅ 基本テンプレート生成成功: {len(basic_template)} 文字")
+                return basic_template
+            else:
+                self.logger.error(f"❌ 基本テンプレート生成失敗")
+                return "# Terraformコード生成に失敗しました。詳細な要件を指定して再度お試しください。"
                 
         except Exception as e:
-            self.logger.error(f"Terraform コード生成エラー: {e}")
-            return None
+            self.logger.error(f"❌ Terraform コード生成エラー: {e}")
+            # 例外時も基本テンプレートを返す
+            return self._get_basic_terraform_template(requirements) or "# エラーが発生しました。"
     
     def get_cost_estimation(self, service_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -1699,41 +1680,1106 @@ resource "aws_iam_role" "lambda_role" {
             "note": "フォールバック情報"
         }
     
-    def _fallback_terraform_generation(self, requirements: str, **kwargs) -> Dict[str, Any]:
-        """Terraform生成 フォールバック"""
-        self.logger.info(f"🏗️ Terraform生成フォールバック: {requirements}")
+    def _extract_terraform_code_from_mcp_result(self, mcp_result: Any) -> Optional[str]:
+        """
+        Terraform MCP Serverの結果からTerraformコードを抽出
         
-        # 基本的なTerraformテンプレートを返す
-        if "vpc" in requirements.lower():
-            code = '''
-# VPC基本構成
-resource "aws_vpc" "main" {
+        Args:
+            mcp_result: MCPサーバーからの生の結果
+            
+        Returns:
+            抽出されたTerraformコード、または抽出失敗時はNone
+        """
+        try:
+            # MCPサーバーの結果形式に応じて処理
+            if isinstance(mcp_result, str):
+                # 文字列の場合はそのまま返す（Terraformコードとして扱う）
+                return mcp_result.strip()
+            
+            elif isinstance(mcp_result, dict):
+                # 辞書の場合は一般的なフィールド名から抽出
+                possible_fields = [
+                    "terraform_code", "code", "terraform", "content", 
+                    "result", "output", "generated_code", "infrastructure_code"
+                ]
+                
+                for field in possible_fields:
+                    if field in mcp_result and mcp_result[field]:
+                        return str(mcp_result[field]).strip()
+                
+                # 直接的なフィールドが見つからない場合、値を検索
+                for key, value in mcp_result.items():
+                    if isinstance(value, str) and "resource" in value.lower() and "aws_" in value.lower():
+                        return value.strip()
+                
+                # 辞書を文字列化して検索
+                full_text = str(mcp_result)
+                if "resource" in full_text.lower() and "aws_" in full_text.lower():
+                    return full_text.strip()
+            
+            elif isinstance(mcp_result, list) and mcp_result:
+                # リストの場合は最初の要素を処理
+                return self._extract_terraform_code_from_mcp_result(mcp_result[0])
+            
+            # その他の場合は文字列化して確認
+            result_str = str(mcp_result).strip()
+            if result_str and len(result_str) > 10:  # 最小限の長さチェック
+                return result_str
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Terraformコード抽出エラー: {e}")
+            return None
+    
+    def _get_basic_terraform_template(self, requirements: str) -> Optional[str]:
+        """
+        要件に基づいて基本的なTerraformテンプレートを生成
+        
+        Args:
+            requirements: Terraformコード生成要件
+            
+        Returns:
+            基本的なTerraformテンプレート
+        """
+        requirements_lower = requirements.lower()
+        
+        # より詳細なパターンマッチング
+        if any(keyword in requirements_lower for keyword in ["vpc", "network", "subnet"]):
+            return self._get_vpc_template(requirements)
+        elif any(keyword in requirements_lower for keyword in ["lambda", "serverless", "function"]):
+            return self._get_lambda_template(requirements)
+        elif any(keyword in requirements_lower for keyword in ["ec2", "instance", "compute"]):
+            return self._get_ec2_template(requirements)
+        elif any(keyword in requirements_lower for keyword in ["rds", "database", "db"]):
+            return self._get_rds_template(requirements)
+        elif any(keyword in requirements_lower for keyword in ["s3", "storage", "bucket"]):
+            return self._get_s3_template(requirements)
+        elif any(keyword in requirements_lower for keyword in ["alb", "load balancer", "elb"]):
+            return self._get_alb_template(requirements)
+        elif any(keyword in requirements_lower for keyword in ["ecs", "fargate", "container"]):
+            return self._get_ecs_template(requirements)
+        else:
+            return '''# Terraformコード生成
+# 要件: {}
+
+# プロバイダー設定
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+# 変数定義
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+# より具体的な要件を指定していただくと、詳細なリソース定義が生成されます。
+# 例: "VPCとEC2インスタンス", "Lambda関数とAPI Gateway", "RDSとElastiCache" など
+'''.format(requirements[:200])
+    
+    def _get_vpc_template(self, requirements: str) -> str:
+        """VPC用テンプレート"""
+        return '''# VPC構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+# データソース
+data "aws_availability_zones" "available" {{
+  state = "available"
+}}
+
+# VPC
+resource "aws_vpc" "main" {{
   cidr_block           = "10.0.0.0/16"
   enable_dns_hostnames = true
   enable_dns_support   = true
   
-  tags = {
-    Name = "main-vpc"
-  }
-}
+  tags = {{
+    Name = "${{var.environment}}-vpc"
+    Environment = var.environment
+  }}
+}}
 
-resource "aws_subnet" "public" {
+# インターネットゲートウェイ
+resource "aws_internet_gateway" "main" {{
+  vpc_id = aws_vpc.main.id
+  
+  tags = {{
+    Name = "${{var.environment}}-igw"
+    Environment = var.environment
+  }}
+}}
+
+# パブリックサブネット
+resource "aws_subnet" "public" {{
+  count = 2
+  
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
+  cidr_block              = "10.0.${{count.index + 1}}.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
   
-  tags = {
-    Name = "public-subnet"
-  }
-}
+  tags = {{
+    Name = "${{var.environment}}-public-subnet-${{count.index + 1}}"
+    Environment = var.environment
+    Type = "Public"
+  }}
+}}
+
+# プライベートサブネット
+resource "aws_subnet" "private" {{
+  count = 2
+  
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.${{count.index + 10}}.0/24"
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+  
+  tags = {{
+    Name = "${{var.environment}}-private-subnet-${{count.index + 1}}"
+    Environment = var.environment
+    Type = "Private"
+  }}
+}}
+
+# パブリックルートテーブル
+resource "aws_route_table" "public" {{
+  vpc_id = aws_vpc.main.id
+  
+  route {{
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-public-rt"
+    Environment = var.environment
+  }}
+}}
+
+# パブリックサブネットとルートテーブルの関連付け
+resource "aws_route_table_association" "public" {{
+  count = length(aws_subnet.public)
+  
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}}
+
+# 出力
+output "vpc_id" {{
+  description = "VPC ID"
+  value       = aws_vpc.main.id
+}}
+
+output "public_subnet_ids" {{
+  description = "Public subnet IDs"
+  value       = aws_subnet.public[*].id
+}}
+
+output "private_subnet_ids" {{
+  description = "Private subnet IDs"
+  value       = aws_subnet.private[*].id
+}}
 '''
-        else:
-            code = "# 詳細な要件を指定してください。"
+    
+    def _get_lambda_template(self, requirements: str) -> str:
+        """Lambda用テンプレート"""
+        return '''# Lambda関数構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+variable "function_name" {{
+  description = "Lambda function name"
+  type        = string
+  default     = "main-function"
+}}
+
+# Lambda実行ロール
+resource "aws_iam_role" "lambda_role" {{
+  name = "${{var.environment}}-${{var.function_name}}-role"
+  
+  assume_role_policy = jsonencode({{
+    Version = "2012-10-17"
+    Statement = [
+      {{
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {{
+          Service = "lambda.amazonaws.com"
+        }}
+      }}
+    ]
+  }})
+  
+  tags = {{
+    Environment = var.environment
+  }}
+}}
+
+# 基本実行ポリシーをアタッチ
+resource "aws_iam_role_policy_attachment" "lambda_basic" {{
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.lambda_role.name
+}}
+
+# Lambda関数用のZIPファイル作成
+data "archive_file" "lambda_zip" {{
+  type        = "zip"
+  output_path = "lambda_function.zip"
+  source {{
+    content = <<EOF
+import json
+
+def handler(event, context):
+    return {{
+        'statusCode': 200,
+        'body': json.dumps('Hello from Lambda!')
+    }}
+EOF
+    filename = "index.py"
+  }}
+}}
+
+# Lambda関数
+resource "aws_lambda_function" "main" {{
+  filename         = data.archive_file.lambda_zip.output_path
+  function_name    = "${{var.environment}}-${{var.function_name}}"
+  role            = aws_iam_role.lambda_role.arn
+  handler         = "index.handler"
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  runtime         = "python3.11"
+  timeout         = 30
+  
+  environment {{
+    variables = {{
+      ENVIRONMENT = var.environment
+    }}
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-${{var.function_name}}"
+    Environment = var.environment
+  }}
+}}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "lambda_logs" {{
+  name              = "/aws/lambda/${{aws_lambda_function.main.function_name}}"
+  retention_in_days = 14
+  
+  tags = {{
+    Environment = var.environment
+  }}
+}}
+
+# 出力
+output "lambda_function_arn" {{
+  description = "Lambda function ARN"
+  value       = aws_lambda_function.main.arn
+}}
+
+output "lambda_function_name" {{
+  description = "Lambda function name"
+  value       = aws_lambda_function.main.function_name
+}}
+'''
+    
+    def _get_ec2_template(self, requirements: str) -> str:
+        """EC2用テンプレート"""
+        return '''# EC2インスタンス構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+variable "instance_type" {{
+  description = "EC2 instance type"
+  type        = string
+  default     = "t3.micro"
+}}
+
+# データソース
+data "aws_ami" "amazon_linux" {{
+  most_recent = true
+  owners      = ["amazon"]
+  
+  filter {{
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }}
+}}
+
+data "aws_vpc" "default" {{
+  default = true
+}}
+
+data "aws_subnets" "default" {{
+  filter {{
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }}
+}}
+
+# セキュリティグループ
+resource "aws_security_group" "ec2_sg" {{
+  name_prefix = "${{var.environment}}-ec2-"
+  vpc_id      = data.aws_vpc.default.id
+  
+  ingress {{
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # 本番環境では制限してください
+  }}
+  
+  ingress {{
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  egress {{
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-ec2-sg"
+    Environment = var.environment
+  }}
+}}
+
+# EC2インスタンス
+resource "aws_instance" "main" {{
+  ami                    = data.aws_ami.amazon_linux.id
+  instance_type          = var.instance_type
+  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  subnet_id              = data.aws_subnets.default.ids[0]
+  
+  user_data = <<-EOF
+              #!/bin/bash
+              yum update -y
+              yum install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              echo "<h1>Hello from ${{var.environment}} environment</h1>" > /var/www/html/index.html
+              EOF
+  
+  tags = {{
+    Name = "${{var.environment}}-ec2-instance"
+    Environment = var.environment
+  }}
+}}
+
+# 出力
+output "instance_id" {{
+  description = "EC2 instance ID"
+  value       = aws_instance.main.id
+}}
+
+output "public_ip" {{
+  description = "EC2 instance public IP"
+  value       = aws_instance.main.public_ip
+}}
+
+output "public_dns" {{
+  description = "EC2 instance public DNS"
+  value       = aws_instance.main.public_dns
+}}
+'''
+    
+    def _get_rds_template(self, requirements: str) -> str:
+        """RDS用テンプレート"""
+        return '''# RDS データベース構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+variable "db_instance_class" {{
+  description = "RDS instance class"
+  type        = string
+  default     = "db.t3.micro"
+}}
+
+variable "db_username" {{
+  description = "Database username"
+  type        = string
+  default     = "dbadmin"
+}}
+
+variable "db_password" {{
+  description = "Database password"
+  type        = string
+  sensitive   = true
+  default     = "changeme123!"  # 本番環境では適切なパスワード管理を行ってください
+}}
+
+# データソース
+data "aws_vpc" "default" {{
+  default = true
+}}
+
+data "aws_subnets" "default" {{
+  filter {{
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }}
+}}
+
+# DBサブネットグループ
+resource "aws_db_subnet_group" "main" {{
+  name       = "${{var.environment}}-db-subnet-group"
+  subnet_ids = data.aws_subnets.default.ids
+  
+  tags = {{
+    Name = "${{var.environment}}-db-subnet-group"
+    Environment = var.environment
+  }}
+}}
+
+# セキュリティグループ
+resource "aws_security_group" "rds_sg" {{
+  name_prefix = "${{var.environment}}-rds-"
+  vpc_id      = data.aws_vpc.default.id
+  
+  ingress {{
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = [data.aws_vpc.default.cidr_block]
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-rds-sg"
+    Environment = var.environment
+  }}
+}}
+
+# RDSインスタンス
+resource "aws_db_instance" "main" {{
+  identifier     = "${{var.environment}}-database"
+  engine         = "mysql"
+  engine_version = "8.0"
+  instance_class = var.db_instance_class
+  
+  allocated_storage     = 20
+  max_allocated_storage = 100
+  storage_type          = "gp2"
+  storage_encrypted     = true
+  
+  db_name  = "appdb"
+  username = var.db_username
+  password = var.db_password
+  
+  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  
+  backup_retention_period = 7
+  backup_window          = "03:00-04:00"
+  maintenance_window     = "sun:04:00-sun:05:00"
+  
+  skip_final_snapshot = true  # 本番環境では false に設定
+  deletion_protection = false # 本番環境では true に設定
+  
+  tags = {{
+    Name = "${{var.environment}}-database"
+    Environment = var.environment
+  }}
+}}
+
+# 出力
+output "rds_endpoint" {{
+  description = "RDS instance endpoint"
+  value       = aws_db_instance.main.endpoint
+}}
+
+output "rds_port" {{
+  description = "RDS instance port"
+  value       = aws_db_instance.main.port
+}}
+'''
+    
+    def _get_s3_template(self, requirements: str) -> str:
+        """S3用テンプレート"""
+        return '''# S3 バケット構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+variable "bucket_name" {{
+  description = "S3 bucket name"
+  type        = string
+  default     = null
+}}
+
+# ランダムID（バケット名の一意性確保）
+resource "random_id" "bucket_suffix" {{
+  byte_length = 4
+}}
+
+# S3バケット
+resource "aws_s3_bucket" "main" {{
+  bucket = var.bucket_name != null ? var.bucket_name : "${{var.environment}}-app-bucket-${{random_id.bucket_suffix.hex}}"
+  
+  tags = {{
+    Name = "${{var.environment}}-app-bucket"
+    Environment = var.environment
+  }}
+}}
+
+# バージョニング設定
+resource "aws_s3_bucket_versioning" "main" {{
+  bucket = aws_s3_bucket.main.id
+  versioning_configuration {{
+    status = "Enabled"
+  }}
+}}
+
+# 暗号化設定
+resource "aws_s3_bucket_server_side_encryption_configuration" "main" {{
+  bucket = aws_s3_bucket.main.id
+  
+  rule {{
+    apply_server_side_encryption_by_default {{
+      sse_algorithm = "AES256"
+    }}
+    bucket_key_enabled = true
+  }}
+}}
+
+# パブリックアクセスブロック
+resource "aws_s3_bucket_public_access_block" "main" {{
+  bucket = aws_s3_bucket.main.id
+  
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}}
+
+# ライフサイクル設定
+resource "aws_s3_bucket_lifecycle_configuration" "main" {{
+  bucket = aws_s3_bucket.main.id
+  
+  rule {{
+    id     = "transition_to_ia"
+    status = "Enabled"
+    
+    transition {{
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }}
+    
+    transition {{
+      days          = 90
+      storage_class = "GLACIER"
+    }}
+    
+    expiration {{
+      days = 365
+    }}
+  }}
+}}
+
+# 出力
+output "bucket_name" {{
+  description = "S3 bucket name"
+  value       = aws_s3_bucket.main.bucket
+}}
+
+output "bucket_arn" {{
+  description = "S3 bucket ARN"
+  value       = aws_s3_bucket.main.arn
+}}
+
+output "bucket_domain_name" {{
+  description = "S3 bucket domain name"
+  value       = aws_s3_bucket.main.bucket_domain_name
+}}
+'''
+    
+    def _get_alb_template(self, requirements: str) -> str:
+        """ALB用テンプレート"""
+        return '''# Application Load Balancer構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+# データソース
+data "aws_vpc" "default" {{
+  default = true
+}}
+
+data "aws_subnets" "default" {{
+  filter {{
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }}
+}}
+
+# セキュリティグループ
+resource "aws_security_group" "alb_sg" {{
+  name_prefix = "${{var.environment}}-alb-"
+  vpc_id      = data.aws_vpc.default.id
+  
+  ingress {{
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  ingress {{
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  egress {{
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-alb-sg"
+    Environment = var.environment
+  }}
+}}
+
+# Application Load Balancer
+resource "aws_lb" "main" {{
+  name               = "${{var.environment}}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg.id]
+  subnets            = data.aws_subnets.default.ids
+  
+  enable_deletion_protection = false  # 本番環境では true に設定
+  
+  tags = {{
+    Name = "${{var.environment}}-alb"
+    Environment = var.environment
+  }}
+}}
+
+# ターゲットグループ
+resource "aws_lb_target_group" "main" {{
+  name     = "${{var.environment}}-tg"
+  port     = 80
+  protocol = "HTTP"
+  vpc_id   = data.aws_vpc.default.id
+  
+  health_check {{
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 30
+    path                = "/"
+    matcher             = "200"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-tg"
+    Environment = var.environment
+  }}
+}}
+
+# リスナー
+resource "aws_lb_listener" "main" {{
+  load_balancer_arn = aws_lb.main.arn
+  port              = "80"
+  protocol          = "HTTP"
+  
+  default_action {{
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.main.arn
+  }}
+}}
+
+# 出力
+output "alb_dns_name" {{
+  description = "ALB DNS name"
+  value       = aws_lb.main.dns_name
+}}
+
+output "alb_zone_id" {{
+  description = "ALB zone ID"
+  value       = aws_lb.main.zone_id
+}}
+
+output "target_group_arn" {{
+  description = "Target group ARN"
+  value       = aws_lb_target_group.main.arn
+}}
+'''
+    
+    def _get_ecs_template(self, requirements: str) -> str:
+        """ECS用テンプレート"""
+        return '''# ECS Fargate構成
+terraform {{
+  required_providers {{
+    aws = {{
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }}
+  }}
+}}
+
+provider "aws" {{
+  region = var.aws_region
+}}
+
+variable "aws_region" {{
+  description = "AWS region"
+  type        = string
+  default     = "ap-northeast-1"
+}}
+
+variable "environment" {{
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}}
+
+variable "app_name" {{
+  description = "Application name"
+  type        = string
+  default     = "webapp"
+}}
+
+# データソース
+data "aws_vpc" "default" {{
+  default = true
+}}
+
+data "aws_subnets" "default" {{
+  filter {{
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }}
+}}
+
+# ECSクラスター
+resource "aws_ecs_cluster" "main" {{
+  name = "${{var.environment}}-${{var.app_name}}-cluster"
+  
+  setting {{
+    name  = "containerInsights"
+    value = "enabled"
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-${{var.app_name}}-cluster"
+    Environment = var.environment
+  }}
+}}
+
+# ECSタスク実行ロール
+resource "aws_iam_role" "ecs_execution_role" {{
+  name = "${{var.environment}}-${{var.app_name}}-execution-role"
+  
+  assume_role_policy = jsonencode({{
+    Version = "2012-10-17"
+    Statement = [
+      {{
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {{
+          Service = "ecs-tasks.amazonaws.com"
+        }}
+      }}
+    ]
+  }})
+  
+  tags = {{
+    Environment = var.environment
+  }}
+}}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_role_policy" {{
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+  role       = aws_iam_role.ecs_execution_role.name
+}}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "app_logs" {{
+  name              = "/ecs/${{var.environment}}-${{var.app_name}}"
+  retention_in_days = 7
+  
+  tags = {{
+    Environment = var.environment
+  }}
+}}
+
+# ECSタスク定義
+resource "aws_ecs_task_definition" "main" {{
+  family                   = "${{var.environment}}-${{var.app_name}}"
+  network_mode             = "awsvpc"
+  requires_compatibility   = ["FARGATE"]
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = aws_iam_role.ecs_execution_role.arn
+  
+  container_definitions = jsonencode([
+    {{
+      name  = var.app_name
+      image = "nginx:latest"
+      
+      portMappings = [
+        {{
+          containerPort = 80
+          hostPort      = 80
+          protocol      = "tcp"
+        }}
+      ]
+      
+      logConfiguration = {{
+        logDriver = "awslogs"
+        options = {{
+          "awslogs-group"         = aws_cloudwatch_log_group.app_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "ecs"
+        }}
+      }}
+      
+      essential = true
+    }}
+  ])
+  
+  tags = {{
+    Name = "${{var.environment}}-${{var.app_name}}-task"
+    Environment = var.environment
+  }}
+}}
+
+# セキュリティグループ
+resource "aws_security_group" "ecs_sg" {{
+  name_prefix = "${{var.environment}}-ecs-"
+  vpc_id      = data.aws_vpc.default.id
+  
+  ingress {{
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  egress {{
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-ecs-sg"
+    Environment = var.environment
+  }}
+}}
+
+# ECSサービス
+resource "aws_ecs_service" "main" {{
+  name            = "${{var.environment}}-${{var.app_name}}-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.main.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+  
+  network_configuration {{
+    subnets          = data.aws_subnets.default.ids
+    security_groups  = [aws_security_group.ecs_sg.id]
+    assign_public_ip = true
+  }}
+  
+  tags = {{
+    Name = "${{var.environment}}-${{var.app_name}}-service"
+    Environment = var.environment
+  }}
+}}
+
+# 出力
+output "ecs_cluster_name" {{
+  description = "ECS cluster name"
+  value       = aws_ecs_cluster.main.name
+}}
+
+output "ecs_service_name" {{
+  description = "ECS service name"
+  value       = aws_ecs_service.main.name
+}}
+
+output "task_definition_arn" {{
+  description = "ECS task definition ARN"
+  value       = aws_ecs_task_definition.main.arn
+}}
+'''
+    
+    def _fallback_terraform_generation(self, requirements: str, **kwargs) -> Dict[str, Any]:
+        """Terraform生成 フォールバック"""
+        self.logger.info(f"🏗️ Terraform生成フォールバック: {requirements}")
+        
+        # より詳細なテンプレート生成
+        terraform_code = self._get_basic_terraform_template(requirements)
+        
+        if not terraform_code:
+            terraform_code = "# 詳細な要件を指定してください。"
         
         return {
             "requirements": requirements,
-            "terraform_code": code,
-            "note": "フォールバックテンプレート",
+            "terraform_code": terraform_code,
+            "note": "フォールバックテンプレート（MCP統合により、より詳細なコードが生成可能）",
             "source": "fallback_terraform"
         }
 
