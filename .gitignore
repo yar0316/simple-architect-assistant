@@ -141,3 +141,6 @@ docs/issues/
 
 # Pull request documentation (local only)
 docs/pull_requests/
+
+# Prompts for Claude Code
+docs/prompts/
