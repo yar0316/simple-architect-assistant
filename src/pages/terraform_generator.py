@@ -389,14 +389,7 @@ with col1:
                                     
                                     # LangChainMCPManagerのterraform_code_generatorツールを使用
                                     terraform_code = None
-                                    available_tools = manual_mcp_manager.get_all_tools()
-                                    
-                                    # terraform_code_generatorツールを検索
-                                    terraform_tool = None
-                                    for tool in available_tools:
-                                        if tool.name == "terraform_code_generator":
-                                            terraform_tool = tool
-                                            break
+                                    terraform_tool = manual_mcp_manager.get_tool_by_name("terraform_code_generator")
                                     
                                     if terraform_tool:
                                         terraform_code = terraform_tool.func(context_info)

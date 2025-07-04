@@ -592,6 +592,20 @@ class LangChainMCPManager:
         """全てのツールを取得"""
         return self.tools
     
+    def get_tool_by_name(self, tool_name: str) -> Optional[BaseTool]:
+        """指定された名前のツールを取得
+        
+        Args:
+            tool_name: 検索するツール名
+            
+        Returns:
+            見つかったツール、または None
+        """
+        for tool in self.tools:
+            if tool.name == tool_name:
+                return tool
+        return None
+    
     def get_tools_by_category(self, category: str) -> List[BaseTool]:
         """カテゴリ別にツールを取得"""
         category_mapping = {
