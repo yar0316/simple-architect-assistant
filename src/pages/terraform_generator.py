@@ -394,7 +394,7 @@ with col1:
                                     # terraform_code_generatorツールを検索
                                     terraform_tool = None
                                     for tool in available_tools:
-                                        if tool.name == "terraform_code_generator":
+                                        if tool.name == TERRAFORM_CODE_GENERATOR_TOOL:
                                             terraform_tool = tool
                                             break
                                     
