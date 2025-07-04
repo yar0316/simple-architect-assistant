@@ -369,11 +369,33 @@ with col1:
                         if st.session_state.get("enable_terraform_mcp", True):
                             with st.spinner("Terraform MCPサーバーから高品質コードを生成中..."):
                                 try:
+                                    # 手動モード専用のLangChainMCPManagerを初期化
+                                    if "manual_langchain_mcp_manager" not in st.session_state:
+                                        st.session_state.manual_langchain_mcp_manager = LangChainMCPManager()
+                                        
+                                        # 既存のMCPクライアントと統合
+                                        existing_mcp_client = get_mcp_client()
+                                        mcp_init_success = st.session_state.manual_langchain_mcp_manager.initialize_with_existing_mcp(
+                                            existing_mcp_client, PAGE_TYPE_TERRAFORM_GENERATOR
+                                        )
+                                        
+                                        if not mcp_init_success:
+                                            st.warning("手動モード用MCP統合に失敗しました。フォールバックモードで動作します。")
+                                    
+                                    manual_mcp_manager = st.session_state.manual_langchain_mcp_manager
+                                    
                                     # Core MCPからガイダンスを取得
                                     core_guidance = mcp_client.get_core_mcp_guidance(context_info)
                                     
-                                    # Terraform MCPサーバーからコード生成
-                                    terraform_code = mcp_client.generate_terraform_code(context_info)
+                                    # LangChainMCPManagerのterraform_code_generatorツールを使用
+                                    terraform_code = None
+                                    terraform_tool = manual_mcp_manager.get_tool_by_name("terraform_code_generator")
+                                    
+                                    if terraform_tool:
+                                        terraform_code = terraform_tool.func(context_info)
+                                    else:
+                                        # フォールバック: 従来のMCPクライアント呼び出し
+                                        terraform_code = mcp_client.generate_terraform_code(context_info)
                                     
                                     # プロンプトを拡張
                                     if core_guidance or terraform_code:
