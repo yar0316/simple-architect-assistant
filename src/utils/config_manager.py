@@ -23,6 +23,10 @@ class ConfigManager:
         
     def _detect_desktop_app(self) -> bool:
         """デスクトップアプリ環境かどうかを検出"""
+        # 環境変数による明示的な検出（最も確実）
+        if os.getenv('IS_DESKTOP_APP'):
+            return True
+        
         # PyInstallerでパッケージされた場合の検出
         if hasattr(sys, 'frozen') and hasattr(sys, '_MEIPASS'):
             return True

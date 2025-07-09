@@ -120,6 +120,9 @@ class DistributionManager:
         try:
             subprocess.run(["git", "--version"], check=True, capture_output=True)
             self._log_action("Git利用可能性確認", "success")
+        except FileNotFoundError:
+            self._log_action("Git利用可能性確認", "error", {"message": "Git実行ファイルが見つかりません"})
+            return False
         except subprocess.CalledProcessError:
             self._log_action("Git利用可能性確認", "error", {"message": "Gitがインストールされていません"})
             return False
@@ -406,7 +409,9 @@ class DistributionManager:
         
         print(f"\n📊 結果サマリー: {successful_count}/{total_count} 成功")
         
-        if successful_count == total_count:
+        if total_count == 0:
+            print("⚠️  配布方法が設定されていません。設定ファイルを確認してください。")
+        elif successful_count == total_count:
             print("🎯 すべての配布方法が成功しました！")
         elif successful_count > 0:
             print("⚠️  一部の配布方法が失敗しました。ログを確認してください。")
