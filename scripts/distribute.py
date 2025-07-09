@@ -272,7 +272,7 @@ class DistributionManager:
 
 ### 🆘 サポート
 - GitHub Issues: https://github.com/yar0316/simple-architect-assistant/issues
-- ドキュメント: BUILD.md, docs/DISTRIBUTION_GUIDE.md
+- ドキュメント: docs/build.md, docs/distribution-guide.md
 """
     
     def deploy_to_s3(self, version: str) -> bool:
