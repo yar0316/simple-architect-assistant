@@ -181,7 +181,7 @@ class DistributionManager:
             })
             return False
     
-    def deploy_to_github(self, version: str, tag_prefix: str = "v") -> bool:
+    def deploy_to_github(self, version: str) -> bool:
         """GitHub Releasesに配布"""
         if not self.config["github"]["enabled"]:
             self.logger.info("GitHub配布は無効化されています")
@@ -190,6 +190,8 @@ class DistributionManager:
         self.logger.info(f"📦 GitHub配布開始: バージョン={version}")
         
         try:
+            # 設定ファイルから tag_prefix を読み取り（デフォルト: "v"）
+            tag_prefix = self.config["github"].get("tag_prefix", "v")
             tag_name = f"{tag_prefix}{version}"
             
             # Gitタグの作成
