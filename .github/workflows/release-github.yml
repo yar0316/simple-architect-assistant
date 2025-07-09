@@ -117,8 +117,8 @@ jobs:
         
         ### 📚 ドキュメント
         - [ビルドガイド](BUILD.md)
-        - [配布ガイド](docs/DISTRIBUTION_GUIDE.md)
-        - [デスクトップアプリガイド](docs/DESKTOP_APP_GUIDE.md)
+        - [配布ガイド](docs/distribution-guide.md)
+        - [デスクトップアプリガイド](docs/desktop-app-guide.md)
         
         ### 🆘 サポート
         - Issues: https://github.com/yar0316/simple-architect-assistant/issues

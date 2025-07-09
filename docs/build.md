@@ -61,4 +61,4 @@ zip -r simple-architect-assistant.zip simple-architect-assistant/
 
 ## 詳細ガイド
 
-詳細な情報は [docs/DESKTOP_APP_GUIDE.md](docs/DESKTOP_APP_GUIDE.md) を参照してください。
+詳細な情報は [docs/desktop-app-guide.md](desktop-app-guide.md) を参照してください。

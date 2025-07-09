@@ -19,21 +19,5 @@
     "email_recipients": [],
     "notify_on_success": false,
     "notify_on_failure": false
-  },
-  "build": {
-    "clean_before_build": true,
-    "run_tests": false,
-    "create_checksums": true,
-    "compression_level": 6
-  },
-  "security": {
-    "virus_scan": false,
-    "digital_signature": false,
-    "encryption": false
-  },
-  "metadata": {
-    "include_build_info": true,
-    "include_git_info": true,
-    "include_system_info": false
   }
 }
