@@ -1,0 +1,41 @@
+{
+  "github": {
+    "enabled": true,
+    "auto_tag": true,
+    "create_release": true,
+    "draft": false,
+    "prerelease": false,
+    "tag_prefix": "v"
+  },
+  "s3": {
+    "enabled": false,
+    "bucket_name": "",
+    "region": "us-east-1",
+    "profile": "default",
+    "prefix": "releases/simple-architect-assistant/",
+    "presign_expiry_days": 7,
+    "cleanup_old_files": false,
+    "max_files_to_keep": 10
+  },
+  "notifications": {
+    "email_recipients": [],
+    "notify_on_success": false,
+    "notify_on_failure": false
+  },
+  "build": {
+    "clean_before_build": true,
+    "run_tests": false,
+    "create_checksums": true,
+    "compression_level": 6
+  },
+  "security": {
+    "virus_scan": false,
+    "digital_signature": false,
+    "encryption": false
+  },
+  "metadata": {
+    "include_build_info": true,
+    "include_git_info": true,
+    "include_system_info": false
+  }
+}
