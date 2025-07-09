@@ -13,9 +13,7 @@
     "region": "us-east-1",
     "profile": "default",
     "prefix": "releases/simple-architect-assistant/",
-    "presign_expiry_days": 7,
-    "cleanup_old_files": false,
-    "max_files_to_keep": 10
+    "presign_expiry_days": 7
   },
   "notifications": {
     "email_recipients": [],

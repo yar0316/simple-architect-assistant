@@ -288,11 +288,24 @@ class DistributionManager:
         self.logger.info(f"☁️  S3配布開始: バージョン={version}")
         
         try:
-            # S3配布スクリプトを実行
+            # S3配布スクリプトを実行（既存のビルド成果物を再利用）
             s3_deployer = S3Deployer()
             s3_deployer.config = self.config  # 設定を共有
             
-            deployment_info = s3_deployer.deploy(version, clean=False, save_info=True)
+            # ビルド成果物が存在するかチェック
+            dist_dir = self.project_root / "dist" / "simple-architect-assistant"
+            if not dist_dir.exists():
+                self.logger.warning("ビルド成果物が見つかりません。S3配布でビルドを実行します")
+                deployment_info = s3_deployer.deploy(version, clean=False, save_info=True)
+            else:
+                self.logger.info("既存のビルド成果物を使用してS3配布を実行します")
+                
+                # アーカイブ作成から開始（ビルドをスキップ）
+                archive_path = s3_deployer.create_distribution_archive(dist_dir, version)
+                s3_key = s3_deployer.upload_to_s3(archive_path, version)
+                presigned_url = s3_deployer.generate_presigned_url(s3_key)
+                deployment_info = s3_deployer.create_deployment_info(s3_key, presigned_url, version, archive_path)
+                s3_deployer.save_deployment_info(deployment_info)
             
             self._log_action("S3配布", "success", {
                 "version": version,

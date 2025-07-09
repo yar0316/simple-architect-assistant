@@ -159,7 +159,7 @@ gh release create v1.0.0 \
 
 ### サポート
 - Issues: https://github.com/yar0316/simple-architect-assistant/issues
-- ドキュメント: [BUILD.md](BUILD.md)
+- ドキュメント: [build.md](build.md)
 EOF
 )"
 ```
