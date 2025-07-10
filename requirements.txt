@@ -12,3 +12,6 @@ langchain-mcp-adapters>=0.1.0
 # Additional dependencies for LangChain
 pydantic>=2.0.0
 python-dotenv
+
+# Desktop app packaging
+streamlit-desktop-app

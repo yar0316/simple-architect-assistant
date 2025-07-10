@@ -1,0 +1,266 @@
+name: S3 Presigned URL Distribution
+
+on:
+  push:
+    tags:
+      - 's3-*'  # s3-v1.0.0, s3-beta-1.0.0 などのタグがプッシュされた時に実行
+  workflow_dispatch:  # 手動実行も可能
+    inputs:
+      version:
+        description: 'リリースバージョン (例: 1.0.0)'
+        required: true
+        default: '1.0.0'
+      bucket_name:
+        description: 'S3バケット名 (空の場合は環境変数を使用)'
+        required: false
+        default: ''
+      expiry_days:
+        description: '署名付きURLの有効期限（日数）'
+        required: false
+        default: '7'
+
+env:
+  PYTHON_VERSION: '3.11'
+  AWS_DEFAULT_REGION: 'us-east-1'
+
+jobs:
+  build-and-deploy-s3:
+    name: Build and Deploy to S3
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zip awscli bc
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install boto3  # S3アクセス用
+    
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    
+    - name: Extract version from tag or input
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          # s3-v1.0.0 -> 1.0.0, s3-beta-1.0.0 -> beta-1.0.0
+          VERSION="${{ github.ref_name }}"
+          VERSION=${VERSION#s3-}
+          VERSION=${VERSION#v}
+        fi
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "Using version: ${VERSION}"
+    
+    - name: Set S3 configuration
+      id: s3_config
+      run: |
+        # バケット名の決定
+        if [[ -n "${{ github.event.inputs.bucket_name }}" ]]; then
+          BUCKET_NAME="${{ github.event.inputs.bucket_name }}"
+        else
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+        fi
+        
+        # 有効期限の決定
+        if [[ -n "${{ github.event.inputs.expiry_days }}" ]]; then
+          EXPIRY_DAYS="${{ github.event.inputs.expiry_days }}"
+        else
+          EXPIRY_DAYS="7"
+        fi
+        
+        echo "bucket_name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
+        echo "expiry_days=${EXPIRY_DAYS}" >> $GITHUB_OUTPUT
+        echo "aws_profile=default" >> $GITHUB_OUTPUT
+        
+        # 設定確認
+        if [[ -z "${BUCKET_NAME}" ]]; then
+          echo "❌ S3バケット名が設定されていません"
+          echo "環境変数 S3_BUCKET_NAME またはワークフロー入力で設定してください"
+          exit 1
+        fi
+        
+        echo "✅ S3設定:"
+        echo "- バケット名: ${BUCKET_NAME}"
+        echo "- 有効期限: ${EXPIRY_DAYS}日"
+        echo "- リージョン: ${{ env.AWS_DEFAULT_REGION }}"
+    
+    - name: Create distribution config
+      run: |
+        mkdir -p config
+        cat > config/distribution.json << EOF
+        {
+          "s3": {
+            "bucket_name": "${{ steps.s3_config.outputs.bucket_name }}",
+            "region": "${{ env.AWS_DEFAULT_REGION }}",
+            "profile": "default",
+            "prefix": "releases/simple-architect-assistant/",
+            "presign_expiry_days": ${{ steps.s3_config.outputs.expiry_days }}
+          }
+        }
+        EOF
+        
+        echo "✅ 配布設定ファイル作成完了"
+        cat config/distribution.json
+    
+    - name: Test AWS connectivity
+      run: |
+        echo "🔍 AWS接続テスト実行中..."
+        aws sts get-caller-identity
+        aws s3 ls "s3://${{ steps.s3_config.outputs.bucket_name }}/" --recursive --human-readable --summarize | head -10
+        echo "✅ AWS接続テスト完了"
+    
+    - name: Deploy to S3
+      id: deploy
+      run: |
+        echo "🚀 S3配布開始..."
+        
+        # デプロイスクリプト実行
+        python scripts/deploy_to_s3.py \
+          --version "${{ steps.version.outputs.version }}" \
+          --config config/distribution.json \
+          --output deployment_info.json
+        
+        # 配布情報を環境変数に設定
+        if [[ -f deployment_info.json ]]; then
+          PRESIGNED_URL=$(jq -r '.deployment_info.download.presigned_url' deployment_info.json)
+          FILE_NAME=$(jq -r '.deployment_info.file_name' deployment_info.json)
+          FILE_SIZE=$(jq -r '.deployment_info.file_size' deployment_info.json)
+          SHA256=$(jq -r '.deployment_info.sha256' deployment_info.json)
+          S3_KEY=$(jq -r '.deployment_info.s3_location.key' deployment_info.json)
+          EXPIRES_AT=$(jq -r '.deployment_info.download.expires_at' deployment_info.json)
+          
+          echo "presigned_url=${PRESIGNED_URL}" >> $GITHUB_OUTPUT
+          echo "file_name=${FILE_NAME}" >> $GITHUB_OUTPUT
+          echo "file_size=${FILE_SIZE}" >> $GITHUB_OUTPUT
+          echo "sha256=${SHA256}" >> $GITHUB_OUTPUT
+          echo "s3_key=${S3_KEY}" >> $GITHUB_OUTPUT
+          echo "expires_at=${EXPIRES_AT}" >> $GITHUB_OUTPUT
+          
+          # ファイルサイズをMB単位で計算
+          FILE_SIZE_MB=$(echo "scale=1; ${FILE_SIZE} / 1024 / 1024" | bc)
+          echo "file_size_mb=${FILE_SIZE_MB}" >> $GITHUB_OUTPUT
+          
+          echo "✅ S3配布完了"
+        else
+          echo "❌ 配布情報ファイルが見つかりません"
+          exit 1
+        fi
+    
+    - name: Upload deployment info
+      uses: actions/upload-artifact@v3
+      with:
+        name: s3-deployment-info-${{ steps.version.outputs.version }}
+        path: deployment_info.json
+        retention-days: 90
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: s3-desktop-app-${{ steps.version.outputs.version }}
+        path: |
+          dist/
+          !dist/dist_config/
+        retention-days: 30
+    
+    - name: Generate deployment summary
+      run: |
+        echo "## 🎉 S3配布完了" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 配布情報" >> $GITHUB_STEP_SUMMARY
+        echo "- **バージョン**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **ファイル名**: ${{ steps.deploy.outputs.file_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **ファイルサイズ**: ${{ steps.deploy.outputs.file_size_mb }}MB" >> $GITHUB_STEP_SUMMARY
+        echo "- **SHA256**: \`${{ steps.deploy.outputs.sha256 }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **S3ロケーション**: \`s3://${{ steps.s3_config.outputs.bucket_name }}/${{ steps.deploy.outputs.s3_key }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **有効期限**: ${{ steps.s3_config.outputs.expiry_days }}日間" >> $GITHUB_STEP_SUMMARY
+        echo "- **期限日時**: ${{ steps.deploy.outputs.expires_at }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 ダウンロードURL" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "${{ steps.deploy.outputs.presigned_url }}" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔒 ファイル整合性確認" >> $GITHUB_STEP_SUMMARY
+        echo "ダウンロード後、以下のコマンドで整合性を確認してください：" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+        echo "# Windows (PowerShell)" >> $GITHUB_STEP_SUMMARY
+        echo "Get-FileHash ${{ steps.deploy.outputs.file_name }} -Algorithm SHA256" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "# macOS/Linux" >> $GITHUB_STEP_SUMMARY
+        echo "sha256sum ${{ steps.deploy.outputs.file_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+        echo "**期待値**: \`${{ steps.deploy.outputs.sha256 }}\`" >> $GITHUB_STEP_SUMMARY
+    
+
+  cleanup-old-releases:
+    name: Cleanup Old S3 Releases
+    runs-on: ubuntu-latest
+    needs: build-and-deploy-s3
+    if: success()
+    
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_DEFAULT_REGION }}
+    
+    - name: Set S3 configuration
+      id: s3_config
+      run: |
+        if [[ -n "${{ github.event.inputs.bucket_name }}" ]]; then
+          BUCKET_NAME="${{ github.event.inputs.bucket_name }}"
+        else
+          BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}"
+        fi
+        echo "bucket_name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
+    
+    - name: List and cleanup old releases
+      run: |
+        PREFIX="releases/simple-architect-assistant/"
+        BUCKET="${{ steps.s3_config.outputs.bucket_name }}"
+        
+        echo "🧹 古いリリースファイルをチェック中..."
+        
+        # 30日以上前のファイルを一覧表示
+        aws s3 ls "s3://${BUCKET}/${PREFIX}" --recursive | \
+          awk '{print $1, $2, $4}' | \
+          while read date time file; do
+            file_date="${date} ${time}"
+            current_date=$(date -u)
+            
+            # 30日以上前かチェック（実際の実装ではより詳細な日付比較が必要）
+            echo "📁 ${file} (${file_date})"
+          done
+        
+        echo "ℹ️ 古いファイルの自動削除は安全上無効化されています"
+        echo "必要に応じて手動でS3コンソールから古いファイルを削除してください"
+        
+        # 現在のファイル数を表示
+        FILE_COUNT=$(aws s3 ls "s3://${BUCKET}/${PREFIX}" --recursive | wc -l)
+        echo "📊 現在のファイル数: ${FILE_COUNT}"
+        
+        if [[ ${FILE_COUNT} -gt 10 ]]; then
+          echo "⚠️  古いファイルが多く存在します。定期的な清掃を推奨します"
+        fi

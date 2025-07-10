@@ -1,0 +1,23 @@
+{
+  "github": {
+    "enabled": true,
+    "auto_tag": true,
+    "create_release": true,
+    "draft": false,
+    "prerelease": false,
+    "tag_prefix": "v"
+  },
+  "s3": {
+    "enabled": false,
+    "bucket_name": "",
+    "region": "us-east-1",
+    "profile": "default",
+    "prefix": "releases/simple-architect-assistant/",
+    "presign_expiry_days": 7
+  },
+  "notifications": {
+    "email_recipients": [],
+    "notify_on_success": false,
+    "notify_on_failure": false
+  }
+}
