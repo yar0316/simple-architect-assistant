@@ -116,7 +116,7 @@ jobs:
         - **起動が遅い**: 初回起動時は依存関係読み込みのため時間がかかります
         
         ### 📚 ドキュメント
-        - [ビルドガイド](BUILD.md)
+        - [ビルドガイド](docs/build.md)
         - [配布ガイド](docs/distribution-guide.md)
         - [デスクトップアプリガイド](docs/desktop-app-guide.md)
         
